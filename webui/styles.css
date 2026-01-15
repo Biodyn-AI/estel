@@ -370,6 +370,7 @@ body.resizing-horizontal {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  padding: 0;
 }
 
 .code textarea,
@@ -423,7 +424,7 @@ body.resizing-horizontal {
 .chain-browser {
   display: grid;
   grid-template-columns: minmax(180px, 240px) 1fr;
-  gap: 16px;
+  gap: 0;
   min-height: 0;
   flex: 1;
 }
@@ -434,13 +435,16 @@ body.resizing-horizontal {
   gap: 10px;
   overflow: auto;
   min-height: 0;
-  padding-right: 6px;
+  padding-right: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
 }
 
 .chain-browser-detail {
   overflow: auto;
   min-height: 0;
-  padding-right: 6px;
+  padding-right: 0;
+  padding-left: 0;
 }
 
 .chain-browser .chain-item {
