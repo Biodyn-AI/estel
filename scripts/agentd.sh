@@ -23,6 +23,7 @@ CODEX_EXEC_FLAGS="${CODEX_EXEC_FLAGS:---skip-git-repo-check}"
 AGENT_VERBOSE="${AGENT_VERBOSE:-0}"
 CODEX_EXEC_MODE="${CODEX_EXEC_MODE:-stdin}"
 AUTONOMOUS_CONTEXT_LIMIT="${AUTONOMOUS_CONTEXT_LIMIT:-4000}"
+CHAIN_SUMMARY_LIMIT="${CHAIN_SUMMARY_LIMIT:-1200}"
 SESSION_CONTEXT_LIMIT="${SESSION_CONTEXT_LIMIT:-8000}"
 SHUTDOWN=0
 
@@ -109,6 +110,15 @@ trim_context() {
     return 0
   fi
   printf '%s' "$text" | tail -c "$limit"
+}
+
+trim_summary() {
+  local text="$1"
+  local limit="$2"
+  if [ -z "$text" ]; then
+    return 0
+  fi
+  printf '%s' "$text" | head -c "$limit"
 }
 
 session_file() {
@@ -293,6 +303,92 @@ extract_next_task() {
     | sed '/^[[:space:]]*$/d'
 }
 
+summary_from_output() {
+  local output_file="$1"
+  if [ ! -f "$output_file" ]; then
+    return 0
+  fi
+  local result
+  result="$(extract_result "$output_file")"
+  if [ -z "$result" ]; then
+    result="$(cat "$output_file")"
+  fi
+  trim_summary "$result" "$CHAIN_SUMMARY_LIMIT"
+}
+
+latest_chain_run_id() {
+  local chain_id="$1"
+  local skip_id="${2:-}"
+  local latest=""
+  shopt -s nullglob
+  local f
+  for f in "$RUNS_DIR"/*/task.json; do
+    local task_chain
+    task_chain="$(jq -r '.chain // empty' "$f" 2>/dev/null || true)"
+    if [ "$task_chain" = "$chain_id" ]; then
+      local run_id
+      run_id="$(basename "$(dirname "$f")")"
+      if [ -n "$skip_id" ] && [ "$run_id" = "$skip_id" ]; then
+        continue
+      fi
+      if [ -z "$latest" ] || [ "$run_id" \> "$latest" ]; then
+        latest="$run_id"
+      fi
+    fi
+  done
+  echo "$latest"
+}
+
+summary_from_chain() {
+  local chain_id="$1"
+  local skip_id="${2:-}"
+  if [ -z "$chain_id" ]; then
+    return 0
+  fi
+  local run_id
+  run_id="$(latest_chain_run_id "$chain_id" "$skip_id")"
+  if [ -z "$run_id" ]; then
+    return 0
+  fi
+  local output_file=""
+  if [ -f "$RUNS_DIR/$run_id/output.txt" ]; then
+    output_file="$RUNS_DIR/$run_id/output.txt"
+  elif [ -f "$OUTBOX_DIR/$run_id.md" ]; then
+    output_file="$OUTBOX_DIR/$run_id.md"
+  fi
+  if [ -z "$output_file" ]; then
+    return 0
+  fi
+  summary_from_output "$output_file"
+}
+
+append_chain_summary() {
+  local chain_id="$1"
+  local output_file="$2"
+  local reason="${3:-}"
+  local prefer_chain="${4:-0}"
+  local skip_id="${5:-}"
+  if [ -z "$output_file" ] || [ ! -f "$output_file" ]; then
+    return 0
+  fi
+  if grep -q '^[[:space:]]*SUMMARY:' "$output_file"; then
+    return 0
+  fi
+  local summary=""
+  if [ "$prefer_chain" != "1" ]; then
+    summary="$(summary_from_output "$output_file")"
+  fi
+  if [ -z "$summary" ]; then
+    summary="$(summary_from_chain "$chain_id" "$skip_id")"
+  fi
+  if [ -z "$summary" ] && [ -n "$reason" ]; then
+    summary="$reason"
+  fi
+  if [ -n "$summary" ]; then
+    printf '\nSUMMARY:\n%s\n' "$summary" >> "$output_file"
+  fi
+}
+
 run_codex() {
   local prompt_file="$1"
   local output_file="$2"
@@ -468,6 +564,7 @@ process_task() {
   if [ "$mode" = "autonomous" ] && chain_stop_requested "$chain"; then
     log "chain $chain stop requested; skipping task $id"
     printf 'DONE\nChain stopped by user.\n' > "$output_file"
+    append_chain_summary "$chain" "$output_file" "Chain stopped by user." 1 "$id"
     record_last_output_chain "${chain:-$id}"
     cp "$output_file" "$OUTBOX_DIR/$id.md"
     rm -f "$task_file"
@@ -476,7 +573,6 @@ process_task() {
 
   log "worker $worker_id running task $id (mode: $mode)"
   if run_codex "$run_dir/prompt.txt" "$output_file" "$raw_file" "$verbose" "$status_file"; then
-    cp "$output_file" "$OUTBOX_DIR/$id.md"
     log "task $id completed"
 
     if [ "$mode" = "manual" ] && [ -n "$session" ]; then
@@ -486,9 +582,13 @@ process_task() {
     if [ "$mode" = "autonomous" ]; then
       record_last_output_chain "${chain:-$id}"
       local next_task result next_id
+      local chain_done=0
+      local chain_reason=""
       next_task="$(extract_next_task "$output_file")"
       if [ "$next_task" = "__DONE__" ]; then
         log "chain ${chain:-$id} completed"
+        chain_done=1
+        chain_reason="Chain completed."
       else
         result="$(extract_result "$output_file")"
         if [ -z "$result" ]; then
@@ -503,8 +603,12 @@ process_task() {
 
         if [ -z "$next_task" ] || [ "$next_task" = "__DONE__" ]; then
           log "chain ${chain:-$id} completed"
+          chain_done=1
+          chain_reason="Chain completed."
         elif chain_stop_requested "$chain"; then
           log "chain $chain stop requested; not queueing next task"
+          chain_done=1
+          chain_reason="Chain stopped by user."
         else
           next_id="$(new_id)"
           jq -n \
@@ -522,7 +626,12 @@ process_task() {
           log "queued next task $next_id (chain ${chain:-$id})"
         fi
       fi
+      if [ "$chain_done" -eq 1 ]; then
+        append_chain_summary "$chain" "$output_file" "$chain_reason" 0 "$id"
+      fi
     fi
+
+    cp "$output_file" "$OUTBOX_DIR/$id.md"
   else
     cp "$output_file" "$FAILED_DIR/$id.md" 2>/dev/null || true
     log "task $id failed"
