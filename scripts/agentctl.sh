@@ -217,6 +217,9 @@ resolve_chain_id() {
     echo ""
     return 0
   fi
+  if printf '%s' "$input" | grep -q '^manual:'; then
+    input="${input#manual:}"
+  fi
   if printf '%s' "$input" | grep -Eq '^[0-9]+$'; then
     local chain
     chain="$(chain_for_alias "$session" "$input")"
@@ -226,6 +229,16 @@ resolve_chain_id() {
     fi
     echo "$chain"
     return 0
+  fi
+  local task_json
+  task_json="${RUNS_DIR}/${input}/task.json"
+  if [ -f "$task_json" ]; then
+    local chain
+    chain="$(jq -r '.chain // empty' "$task_json" 2>/dev/null || true)"
+    if [ -n "$chain" ]; then
+      echo "$chain"
+      return 0
+    fi
   fi
   echo "$input"
 }
