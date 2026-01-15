@@ -326,6 +326,17 @@ chain_is_active() {
   return 1
 }
 
+run_id_active() {
+  local run_id="$1"
+  if [ -z "$run_id" ]; then
+    return 1
+  fi
+  if [ -f "$INBOX_DIR/$run_id.json" ] || [ -f "$WORKING_DIR/$run_id.json" ]; then
+    return 0
+  fi
+  return 1
+}
+
 manual_chain_active() {
   local session="$1"
   shopt -s nullglob
@@ -483,7 +494,7 @@ reactivate_chain_if_needed() {
   if [ -z "$session" ] && [ -n "${AGENT_SESSION:-}" ]; then
     session="$AGENT_SESSION"
   fi
-  if manual_chain_active "$session"; then
+  if run_id_active "$chain_id"; then
     return 0
   fi
   rm -f "$(chain_stop_file "$chain_id")"
