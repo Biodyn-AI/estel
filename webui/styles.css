@@ -438,6 +438,8 @@ body.resizing-horizontal {
   padding: 10px;
   font-family: var(--sans);
   resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .mode-toggle {
