@@ -192,6 +192,7 @@ Start it:
 Then open `http://localhost:5177`.
 
 Tip: to pick a workspace folder via Finder, run `./agent ui --finder`.
+You can also use the **switch workspace** button in the top bar to open the Finder picker.
 
 The UI uses the `UI_SESSION` (default `webui`) to keep manual REPL history and uses the
 shared queue to create and observe chains.

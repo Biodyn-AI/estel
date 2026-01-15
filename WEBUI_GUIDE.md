@@ -7,6 +7,7 @@ AutoAgents includes a browser-based IDE-style dashboard for monitoring and contr
 - Or start the UI directly: `./agent ui`
 - Open the UI: `http://localhost:5177`
 - Finder picker: `./agent ui --finder` (choose a folder, then the UI points at `./container` inside it)
+- The top bar includes a **switch workspace** button that opens the same Finder picker.
 - The header shows `container` and `session` status. If these are stale, refresh the page or restart the container.
 
 ## Layout Overview

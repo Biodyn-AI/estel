@@ -29,6 +29,7 @@ const followAll = document.getElementById("followAll");
 const metaContainer = document.getElementById("metaContainer");
 const metaSession = document.getElementById("metaSession");
 const themeToggle = document.getElementById("themeToggle");
+const workspacePicker = document.getElementById("workspacePicker");
 const noteModal = document.getElementById("noteModal");
 const noteInput = document.getElementById("noteInput");
 const noteSubmit = document.getElementById("noteSubmit");
@@ -145,6 +146,33 @@ const initTheme = () => {
     ? window.matchMedia("(prefers-color-scheme: dark)").matches
     : false;
   applyTheme(prefersDark ? "dark" : "light");
+};
+
+const HOST_PICK_URL = "http://localhost:5178/pick";
+
+const runWorkspacePicker = async () => {
+  if (!workspacePicker) return;
+  const original = workspacePicker.textContent;
+  workspacePicker.disabled = true;
+  workspacePicker.textContent = "opening...";
+  try {
+    const res = await fetch(HOST_PICK_URL, { method: "POST" });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "picker failed");
+    }
+    workspacePicker.textContent = "switching...";
+    setTimeout(() => {
+      window.location.reload();
+    }, 2000);
+  } catch (err) {
+    console.error(err);
+    workspacePicker.textContent = "picker offline";
+    setTimeout(() => {
+      workspacePicker.textContent = original;
+      workspacePicker.disabled = false;
+    }, 2000);
+  }
 };
 
 const replTabLabels = new Map();
@@ -1864,6 +1892,12 @@ if (themeToggle) {
       localStorage.setItem(THEME_KEY, next);
     }
     applyTheme(next);
+  });
+}
+
+if (workspacePicker) {
+  workspacePicker.addEventListener("click", () => {
+    runWorkspacePicker();
   });
 }
 
