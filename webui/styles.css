@@ -199,10 +199,18 @@ body {
 }
 
 .tree-item {
+  width: 100%;
+  text-align: left;
+  border: none;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   margin-bottom: 6px;
   font-size: 13px;
+  font-family: var(--sans);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }
 
 .tree-item.folder {
@@ -219,6 +227,25 @@ body {
 .tree-item.active {
   border: 1px solid var(--accent);
   background: rgba(216, 108, 47, 0.14);
+}
+
+.tree-root {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.tree-icon {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.tree-children {
+  margin-left: 18px;
+  border-left: 1px dashed rgba(93, 108, 112, 0.3);
+  padding-left: 10px;
 }
 
 .tabs {
@@ -261,6 +288,18 @@ body {
   border-radius: var(--radius-md);
   padding: 18px;
   min-height: 260px;
+  overflow: auto;
+}
+
+.code-empty {
+  color: #7d8a96;
+  font-size: 13px;
+}
+
+.code-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .line {
@@ -272,6 +311,10 @@ body {
 
 .ln {
   color: #72808a;
+}
+
+.code-text {
+  white-space: pre;
 }
 
 .kw {

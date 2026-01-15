@@ -191,6 +191,9 @@ Then open `http://localhost:5177`.
 The UI uses the `UI_SESSION` (default `webui`) to keep manual REPL history and uses the
 shared queue to create and observe chains.
 
+The UI streams chain and REPL updates via Server-Sent Events (`/api/stream`) and loads
+folder structure and file previews dynamically from `/api/tree` and `/api/file`.
+
 ## Pausing processing
 
 You can pause the queue without stopping the container:

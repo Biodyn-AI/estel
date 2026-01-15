@@ -10,6 +10,9 @@ const LOG_FILE = process.env.LOG_FILE || path.join(WORKSPACE, "logs", "agentd.lo
 const UI_SESSION = process.env.UI_SESSION || "webui";
 const STATIC_DIR = path.join(WORKSPACE, "webui");
 const PORT = Number(process.env.UI_PORT || process.env.PORT || 5177);
+const TREE_SKIP = new Set([".git", "node_modules"]);
+const MAX_FILE_BYTES = 200 * 1024;
+const clients = new Set();
 
 const STATUS_DIRS = {
   queued: "inbox",
@@ -58,6 +61,76 @@ const readJson = (filePath) => {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return null;
+  }
+};
+
+const resolveWorkspacePath = (requestedPath) => {
+  const cleaned = requestedPath ? requestedPath.trim() : "";
+  const resolved = cleaned
+    ? path.resolve(cleaned.startsWith("/") ? cleaned : path.join(WORKSPACE, cleaned))
+    : path.resolve(WORKSPACE);
+  if (!resolved.startsWith(WORKSPACE)) {
+    throw new Error("path outside workspace");
+  }
+  const relative = path.relative(WORKSPACE, resolved) || "";
+  return { resolved, relative };
+};
+
+const readTree = (dirPath, depth) => {
+  if (depth < 0) return [];
+  const entries = safeReadDir(dirPath)
+    .filter((name) => !TREE_SKIP.has(name))
+    .map((name) => {
+      const fullPath = path.join(dirPath, name);
+      const stat = fs.statSync(fullPath);
+      const type = stat.isDirectory() ? "folder" : "file";
+      const relative = path.relative(WORKSPACE, fullPath);
+      return { name, type, path: relative, fullPath };
+    })
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  return entries.map((entry) => {
+    if (entry.type === "folder" && depth > 0) {
+      return {
+        name: entry.name,
+        type: entry.type,
+        path: entry.path,
+        entries: readTree(entry.fullPath, depth - 1),
+      };
+    }
+    return {
+      name: entry.name,
+      type: entry.type,
+      path: entry.path,
+    };
+  });
+};
+
+const getStatePayload = () => {
+  const tasks = loadTasks();
+  const chains = buildChains(tasks);
+  const activeChain = loadActiveChainId(chains);
+  const repl = loadReplLines();
+  return { chains, activeChain, repl };
+};
+
+const broadcast = (event, payload) => {
+  const data = `event: ${event}\n` + `data: ${JSON.stringify(payload)}\n\n`;
+  clients.forEach((res) => {
+    res.write(data);
+  });
+};
+
+let lastStateSignature = "";
+const broadcastStateIfChanged = () => {
+  const payload = getStatePayload();
+  const signature = JSON.stringify(payload);
+  if (signature !== lastStateSignature) {
+    lastStateSignature = signature;
+    broadcast("state", payload);
   }
 };
 
@@ -257,12 +330,57 @@ const handleApi = async (req, res, pathname) => {
     return sendJson(res, 200, { status: "ok" });
   }
 
+  if (req.method === "GET" && pathname === "/api/stream") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("\n");
+    clients.add(res);
+    res.write(`event: state\ndata: ${JSON.stringify(getStatePayload())}\n\n`);
+    req.on("close", () => {
+      clients.delete(res);
+    });
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/api/state") {
-    const tasks = loadTasks();
-    const chains = buildChains(tasks);
-    const activeChain = loadActiveChainId(chains);
-    const repl = loadReplLines();
-    return sendJson(res, 200, { chains, activeChain, repl });
+    return sendJson(res, 200, getStatePayload());
+  }
+
+  if (req.method === "GET" && pathname === "/api/tree") {
+    const query = url.parse(req.url, true).query;
+    const depth = Math.min(Number(query.depth || 2), 5);
+    const { resolved, relative } = resolveWorkspacePath(query.path || "");
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return sendJson(res, 404, { error: "directory not found" });
+    }
+    const entries = readTree(resolved, depth);
+    return sendJson(res, 200, { path: relative, entries });
+  }
+
+  if (req.method === "GET" && pathname === "/api/file") {
+    const query = url.parse(req.url, true).query;
+    const { resolved, relative } = resolveWorkspacePath(query.path || "");
+    if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
+      return sendJson(res, 404, { error: "file not found" });
+    }
+    const stat = fs.statSync(resolved);
+    let content = "";
+    let truncated = false;
+    if (stat.size > MAX_FILE_BYTES) {
+      const fd = fs.openSync(resolved, "r");
+      const buffer = Buffer.alloc(MAX_FILE_BYTES);
+      fs.readSync(fd, buffer, 0, MAX_FILE_BYTES, 0);
+      fs.closeSync(fd);
+      content = buffer.toString("utf8");
+      truncated = true;
+    } else {
+      content = fs.readFileSync(resolved, "utf8");
+    }
+    return sendJson(res, 200, { path: relative, content, truncated });
   }
 
   if (req.method === "POST" && pathname === "/api/chains") {
@@ -283,6 +401,7 @@ const handleApi = async (req, res, pathname) => {
         UI_SESSION,
         payload.prompt,
       ]);
+      broadcastStateIfChanged();
       return sendJson(res, 200, { id: alias, mode: "auto" });
     }
     const id = await runAgentctl([
@@ -291,6 +410,7 @@ const handleApi = async (req, res, pathname) => {
       UI_SESSION,
       payload.prompt,
     ]);
+    broadcastStateIfChanged();
     return sendJson(res, 200, { id, mode: "manual" });
   }
 
@@ -311,11 +431,19 @@ const handleApi = async (req, res, pathname) => {
       UI_SESSION,
       payload.input,
     ]);
+    broadcastStateIfChanged();
     return sendJson(res, 200, { id });
   }
 
   if (req.method === "POST" && pathname === "/api/stop-current") {
     await runAgentctl(["chain-stop-current"]);
+    broadcastStateIfChanged();
+    return sendJson(res, 200, { status: "ok" });
+  }
+
+  if (req.method === "POST" && pathname === "/api/stop-all") {
+    await runAgentctl(["chain-stop-all"]);
+    broadcastStateIfChanged();
     return sendJson(res, 200, { status: "ok" });
   }
 
@@ -323,6 +451,7 @@ const handleApi = async (req, res, pathname) => {
   if (req.method === "POST" && chainStopMatch) {
     const id = chainStopMatch[1];
     await runAgentctl(["chain-stop", id]);
+    broadcastStateIfChanged();
     return sendJson(res, 200, { status: "ok" });
   }
 
@@ -365,3 +494,10 @@ server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Web UI running on http://localhost:${PORT}`);
 });
+
+setInterval(broadcastStateIfChanged, 1500);
+setInterval(() => {
+  clients.forEach((res) => {
+    res.write(": ping\n\n");
+  });
+}, 15000);

@@ -34,27 +34,7 @@
             <h2>Folder Structure</h2>
             <button class="ghost">/workspace</button>
           </div>
-          <div class="tree-body">
-            <div class="tree-group">
-              <div class="tree-item folder">agents</div>
-              <div class="tree-item file">agent</div>
-              <div class="tree-item file">README.md</div>
-              <div class="tree-item file">REPL_CONTROLS.MLD</div>
-              <div class="tree-item file">TARGET_REPO.md</div>
-            </div>
-            <div class="tree-group">
-              <div class="tree-item folder">scripts</div>
-              <div class="tree-item file">agentd.sh</div>
-              <div class="tree-item file">agentctl.sh</div>
-              <div class="tree-item file">entrypoint.sh</div>
-            </div>
-            <div class="tree-group">
-              <div class="tree-item folder">webui</div>
-              <div class="tree-item file active">index.html</div>
-              <div class="tree-item file">styles.css</div>
-              <div class="tree-item file">app.js</div>
-            </div>
-          </div>
+          <div class="tree-body" id="treeBody"></div>
         </section>
 
         <section class="pane editor">
@@ -68,22 +48,11 @@
           </div>
           <div class="editor-body">
             <div class="code-header">
-              <span>workspace/scripts/agentd.sh</span>
-              <span class="pill alt">autonomous chain</span>
+              <span id="codePath">Select a file to preview</span>
+              <span class="pill alt" id="codeBadge">idle</span>
             </div>
-            <div class="code">
-              <div class="line"><span class="ln">1</span><span class="kw">build_autonomous_prompt</span>() {</div>
-              <div class="line"><span class="ln">2</span>  <span class="kw">local</span> goal="$1"</div>
-              <div class="line"><span class="ln">3</span>  <span class="kw">local</span> task="$2"</div>
-              <div class="line"><span class="ln">4</span>  <span class="kw">local</span> context="$3"</div>
-              <div class="line"><span class="ln">5</span></div>
-              <div class="line"><span class="ln">6</span>  <span class="cm"># Compose prompt with REPL history and chain notes</span></div>
-              <div class="line"><span class="ln">7</span>  <span class="kw">cat</span> &lt;&lt;EOF</div>
-              <div class="line"><span class="ln">8</span>  You are running in an autonomous loop using the Codex CLI.</div>
-              <div class="line"><span class="ln">9</span>  GOAL: ${goal}</div>
-              <div class="line"><span class="ln">10</span> CURRENT_TASK: ${task}</div>
-              <div class="line"><span class="ln">11</span>EOF</div>
-              <div class="line"><span class="ln">12</span>}</div>
+            <div class="code" id="codePane">
+              <div class="code-empty">Pick a file from the tree to view it here.</div>
             </div>
           </div>
         </section>
