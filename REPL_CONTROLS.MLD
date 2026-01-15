@@ -25,9 +25,12 @@ Commands
 
 /note [chain-id] <note>
   Replace chain notes. Notes are injected into future autonomous steps.
+  If the note includes the word "stop", the chain is also stopped after the
+  current task finishes.
 
 /note+ [chain-id] <note>
-  Append to chain notes.
+  Append to chain notes. If the note includes the word "stop", the chain is
+  also stopped after the current task finishes.
 
 /note-clear [chain-id]
   Clear chain notes.

@@ -133,6 +133,7 @@ DONE
 - Stop the last active chain that produced output: `/stop-current`
 - Resume a chain: `/resume <chain-id>`
 - Add chain notes (influence future steps): `/note <chain-id> <note>`
+- Notes containing the word "stop" also request a stop after the current task.
 
 Stopping a chain lets the in-flight task finish. Any queued tasks for that chain are purged, and
 no new tasks are enqueued after the stop is observed.

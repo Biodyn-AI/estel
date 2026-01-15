@@ -63,6 +63,15 @@ chain_stop_file() {
   echo "${CHAINS_DIR}/${chain_id}.stop"
 }
 
+note_requests_stop() {
+  local note="$1"
+  if [ -z "$note" ]; then
+    return 1
+  fi
+  printf '%s' "$note" | tr '[:upper:]' '[:lower:]' \
+    | grep -Eq '(^|[^[:alnum:]_])stop([^[:alnum:]_]|$)'
+}
+
 status_file_for_task() {
   local id="$1"
   echo "${RUNS_DIR}/${id}/status.txt"
@@ -934,6 +943,9 @@ chain_note_cmd() {
   id="$(resolve_chain_id "$session" "$id")"
   echo "$note" > "$(chain_note_file "$id")"
   echo "note set"
+  if note_requests_stop "$note"; then
+    chain_stop_cmd "$id"
+  fi
 }
 
 chain_append_cmd() {
@@ -948,6 +960,9 @@ chain_append_cmd() {
   id="$(resolve_chain_id "$session" "$id")"
   echo "$note" >> "$(chain_note_file "$id")"
   echo "note appended"
+  if note_requests_stop "$note"; then
+    chain_stop_cmd "$id"
+  fi
 }
 
 chain_clear_cmd() {
