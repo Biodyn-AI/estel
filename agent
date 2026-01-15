@@ -87,6 +87,7 @@ Usage:
   agent start-autonomous "goal"
   agent --verbose --auto "goal"
   agent list
+  agent stats [--json] [--session <id>] [--active-only]
   agent status <id>
   agent wait <id>
   agent follow <chain-id>
@@ -378,7 +379,7 @@ case "${1:-}" in
       compose exec -u agent agent bash
     fi
     ;;
-  list|status|wait)
+  list|status|wait|stats)
     ensure_running
     agentctl_exec "$@"
     ;;
