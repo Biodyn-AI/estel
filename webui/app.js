@@ -25,6 +25,11 @@ const noteChain = document.getElementById("noteChain");
 const followAll = document.getElementById("followAll");
 const metaContainer = document.getElementById("metaContainer");
 const metaSession = document.getElementById("metaSession");
+const noteModal = document.getElementById("noteModal");
+const noteInput = document.getElementById("noteInput");
+const noteSubmit = document.getElementById("noteSubmit");
+const noteCancel = document.getElementById("noteCancel");
+const noteChainLabel = document.getElementById("noteChainLabel");
 const workspace = document.getElementById("workspace");
 const paneTree = document.getElementById("paneTree");
 const paneEditor = document.getElementById("paneEditor");
@@ -54,6 +59,7 @@ let showActiveOnly = false;
 let statsSnapshot = null;
 let statsLoading = null;
 const statsCache = new Map();
+let noteTargetChain = null;
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -145,6 +151,26 @@ const updateChainActions = () => {
   const canAct = Boolean(chain);
   if (followChain) followChain.disabled = !canAct;
   if (noteChain) noteChain.disabled = !canAct;
+};
+
+const openNoteModal = (chain) => {
+  if (!noteModal || !noteInput || !noteChainLabel) return;
+  noteTargetChain = chain;
+  const label = chain.displayId || chain.chainId || chain.id || "--";
+  noteChainLabel.textContent = `Chain ${label}`;
+  noteInput.value = "";
+  noteModal.classList.remove("hidden");
+  noteModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    noteInput.focus();
+  }, 0);
+};
+
+const closeNoteModal = () => {
+  if (!noteModal) return;
+  noteTargetChain = null;
+  noteModal.classList.add("hidden");
+  noteModal.setAttribute("aria-hidden", "true");
 };
 
 const formatTimestamp = (value) => {
@@ -1187,18 +1213,60 @@ if (noteChain) {
   noteChain.addEventListener("click", async () => {
     const chain = getActionChain();
     if (!chain) return;
-    const label = chain.displayId || chain.chainId || chain.id;
-    const note = window.prompt(`Append a note for chain ${label}:`);
+    openNoteModal(chain);
+  });
+}
+
+if (noteCancel) {
+  noteCancel.addEventListener("click", () => {
+    closeNoteModal();
+  });
+}
+
+if (noteModal) {
+  noteModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.action === "close") {
+      closeNoteModal();
+    }
+  });
+}
+
+if (noteSubmit) {
+  noteSubmit.addEventListener("click", async () => {
+    if (!noteTargetChain || !noteInput) return;
+    const note = noteInput.value.trim();
     if (!note) return;
     try {
-      await postJson(`/api/chains/${encodeURIComponent(chain.chainId || chain.id)}/note`, {
-        note,
-      });
+      await postJson(
+        `/api/chains/${encodeURIComponent(noteTargetChain.chainId || noteTargetChain.id)}/note`,
+        { note }
+      );
+      closeNoteModal();
+      refreshState();
     } catch (err) {
       console.error(err);
     }
   });
 }
+
+if (noteInput) {
+  noteInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeNoteModal();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      noteSubmit?.click();
+    }
+  });
+}
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && noteModal && !noteModal.classList.contains("hidden")) {
+    closeNoteModal();
+  }
+});
 
 if (editToggle) {
   editToggle.addEventListener("click", () => {

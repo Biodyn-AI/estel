@@ -112,6 +112,25 @@
       </section>
     </div>
 
+    <div class="modal hidden" id="noteModal" aria-hidden="true">
+      <div class="modal-backdrop" data-action="close"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="noteTitle">
+        <div class="modal-header">
+          <div class="modal-title" id="noteTitle">Append note</div>
+          <div class="modal-subtitle" id="noteChainLabel">Chain --</div>
+        </div>
+        <textarea
+          id="noteInput"
+          rows="6"
+          placeholder="Add context or guidance for this chain..."
+        ></textarea>
+        <div class="modal-actions">
+          <button id="noteCancel" class="ghost" type="button">Cancel</button>
+          <button id="noteSubmit" class="primary" type="button">Append note</button>
+        </div>
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>
