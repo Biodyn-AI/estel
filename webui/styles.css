@@ -512,6 +512,12 @@ body {
   color: var(--ink);
 }
 
+.chain-status {
+  font-size: 12px;
+  color: var(--accent-2);
+  font-style: italic;
+}
+
 .chain-meta {
   display: flex;
   gap: 6px;

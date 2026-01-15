@@ -64,6 +64,13 @@ const readJson = (filePath) => {
   }
 };
 
+const readStatusLine = (id) => {
+  const file = path.join(QUEUE_DIR, "runs", id, "status.txt");
+  if (!fs.existsSync(file)) return "";
+  const content = fs.readFileSync(file, "utf8").trim().split(/\r?\n/);
+  return content[content.length - 1] || "";
+};
+
 const resolveWorkspacePath = (requestedPath) => {
   const cleaned = requestedPath ? requestedPath.trim() : "";
   const resolved = cleaned
@@ -185,6 +192,9 @@ const loadTasks = () => {
         if (!file.endsWith(".json")) return;
         const data = readJson(path.join(targetDir, file));
         if (!data) return;
+        if (status === "working") {
+          data.statusLine = readStatusLine(data.id);
+        }
         tasks.push({
           ...data,
           status,
@@ -223,11 +233,15 @@ const buildChains = (tasks) => {
       statusSet: new Set(),
       updatedAt: 0,
       scope: "workspace",
+      statusLine: "",
     };
 
     entry.statusSet.add(task.status || "queued");
     entry.updatedAt = Math.max(entry.updatedAt, task.updatedAt || 0);
     if (!entry.title && title) entry.title = title;
+    if (task.status === "working" && task.statusLine) {
+      entry.statusLine = task.statusLine;
+    }
     chainMap.set(chainKey, entry);
   });
 
@@ -253,6 +267,7 @@ const buildChains = (tasks) => {
       mode: entry.mode,
       title: entry.title,
       status,
+      statusLine: entry.statusLine,
       scope: entry.scope,
       updatedAt: entry.updatedAt,
     };

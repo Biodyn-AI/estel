@@ -38,6 +38,47 @@ if [ -z "${USER:-}" ] || [ "$USER" = "root" ]; then
   export USER="$(id -un)"
 fi
 
+status_from_line() {
+  local line="$1"
+  line="${line//$'\r'/}"
+  line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [ -z "$line" ]; then
+    return 1
+  fi
+  case "$line" in
+    thinking*|Thinking*)
+      echo "thinking..."
+      return 0
+      ;;
+    "**"*"**")
+      echo "${line//\*\*/}"
+      return 0
+      ;;
+    exec)
+      echo "running command..."
+      return 0
+      ;;
+    mcp\ startup:*)
+      echo "$line"
+      return 0
+      ;;
+    ERROR*|error:*)
+      echo "$line"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+update_status_file() {
+  local file="$1"
+  local line="$2"
+  if [ -z "$file" ] || [ -z "$line" ]; then
+    return 0
+  fi
+  printf '%s\n' "$line" > "$file"
+}
+
 log() {
   local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
   echo "$msg"
@@ -257,6 +298,7 @@ run_codex() {
   local output_file="$2"
   local raw_file="$3"
   local verbose="$4"
+  local status_file="${5:-}"
   local -a flags_arr=()
   local -a exec_flags_arr=()
   if [ -n "$CODEX_FLAGS" ]; then
@@ -275,39 +317,47 @@ run_codex() {
     return 127
   fi
 
+  local -a cmd=("$CODEX_BIN" "${flags_arr[@]}" exec "${exec_flags_arr[@]}")
+  local output_target="$raw_file"
   if [ "$verbose" -eq 1 ]; then
-    local -a cmd=("$CODEX_BIN" "${flags_arr[@]}" exec "${exec_flags_arr[@]}")
-    if [ "$CODEX_EXEC_MODE" = "arg" ]; then
-      local prompt
-      prompt="$(cat "$prompt_file")"
-      set +e
-      "${cmd[@]}" "$prompt" 2>&1 | tee "$output_file" >> "$LOG_FILE"
-      local status=$?
-      set -e
-      return "$status"
-    else
-      set +e
-      "${cmd[@]}" < "$prompt_file" 2>&1 | tee "$output_file" >> "$LOG_FILE"
-      local status=$?
-      set -e
-      return "$status"
-    fi
+    output_target="$output_file"
+  else
+    cmd+=("--output-last-message" "$output_file")
   fi
 
-  local -a cmd=("$CODEX_BIN" "${flags_arr[@]}" exec "${exec_flags_arr[@]}" --output-last-message "$output_file")
+  set +e
   if [ "$CODEX_EXEC_MODE" = "arg" ]; then
     local prompt
     prompt="$(cat "$prompt_file")"
-    set +e
-    "${cmd[@]}" "$prompt" 2>&1 | tee "$raw_file" >> "$LOG_FILE"
-    local status=$?
-    set -e
+    "${cmd[@]}" "$prompt" 2>&1 | while IFS= read -r line; do
+      printf '%s\n' "$line" >> "$output_target"
+      if [ "$output_target" != "$raw_file" ]; then
+        printf '%s\n' "$line" >> "$raw_file"
+      fi
+      echo "$line" >> "$LOG_FILE"
+      local status_line
+      status_line="$(status_from_line "$line" || true)"
+      if [ -n "$status_line" ]; then
+        update_status_file "$status_file" "$status_line"
+      fi
+    done
+    local status=${PIPESTATUS[0]}
   else
-    set +e
-    "${cmd[@]}" < "$prompt_file" 2>&1 | tee "$raw_file" >> "$LOG_FILE"
-    local status=$?
-    set -e
+    "${cmd[@]}" < "$prompt_file" 2>&1 | while IFS= read -r line; do
+      printf '%s\n' "$line" >> "$output_target"
+      if [ "$output_target" != "$raw_file" ]; then
+        printf '%s\n' "$line" >> "$raw_file"
+      fi
+      echo "$line" >> "$LOG_FILE"
+      local status_line
+      status_line="$(status_from_line "$line" || true)"
+      if [ -n "$status_line" ]; then
+        update_status_file "$status_file" "$status_line"
+      fi
+    done
+    local status=${PIPESTATUS[0]}
   fi
+  set -e
 
   if [ ! -s "$output_file" ] && [ -f "$raw_file" ]; then
     cp "$raw_file" "$output_file"
@@ -331,7 +381,7 @@ suggest_next_task() {
   : > "$output_file"
   : > "$raw_file"
 
-  if run_codex "$prompt_file" "$output_file" "$raw_file" 0; then
+  if run_codex "$prompt_file" "$output_file" "$raw_file" 0 ""; then
     extract_next_task "$output_file"
   else
     log "fallback next-task generation failed"
@@ -409,8 +459,11 @@ process_task() {
 
   local output_file="${run_dir}/output.txt"
   local raw_file="${run_dir}/raw.txt"
+  local status_file="${run_dir}/status.txt"
   : > "$output_file"
   : > "$raw_file"
+  : > "$status_file"
+  update_status_file "$status_file" "starting codex..."
 
   if [ "$mode" = "autonomous" ] && chain_stop_requested "$chain"; then
     log "chain $chain stop requested; skipping task $id"
@@ -422,7 +475,7 @@ process_task() {
   fi
 
   log "worker $worker_id running task $id (mode: $mode)"
-  if run_codex "$run_dir/prompt.txt" "$output_file" "$raw_file" "$verbose"; then
+  if run_codex "$run_dir/prompt.txt" "$output_file" "$raw_file" "$verbose" "$status_file"; then
     cp "$output_file" "$OUTBOX_DIR/$id.md"
     log "task $id completed"
 
@@ -477,6 +530,8 @@ process_task() {
       record_last_output_chain "${chain:-$id}"
     fi
   fi
+
+  update_status_file "$status_file" "idle"
 
   rm -f "$task_file"
 }

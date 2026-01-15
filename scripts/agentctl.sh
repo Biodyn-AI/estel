@@ -63,6 +63,20 @@ chain_stop_file() {
   echo "${CHAINS_DIR}/${chain_id}.stop"
 }
 
+status_file_for_task() {
+  local id="$1"
+  echo "${RUNS_DIR}/${id}/status.txt"
+}
+
+status_line_for_task() {
+  local id="$1"
+  local file
+  file="$(status_file_for_task "$id")"
+  if [ -f "$file" ]; then
+    tail -n 1 "$file" 2>/dev/null | tr -d '\r'
+  fi
+}
+
 last_output_chain_file() {
   echo "${CHAINS_DIR}/last_output"
 }
@@ -484,21 +498,55 @@ wait_cmd() {
   fi
 
   local output_file="$RUNS_DIR/$id/output.txt"
+  local status_file="$RUNS_DIR/$id/status.txt"
+  local use_status=0
+  local status_active=0
+  local last_status=""
+  if [ -t 1 ] && [ "${FOLLOW_STATUS_LINE:-1}" != "0" ]; then
+    use_status=1
+  fi
+
+  status_clear() {
+    if [ "$use_status" -eq 1 ] && [ "$status_active" -eq 1 ]; then
+      printf '\r\033[K'
+      status_active=0
+    fi
+  }
+
+  status_print() {
+    local text="$1"
+    if [ "$use_status" -eq 1 ]; then
+      printf '\r\033[K%s' "$text"
+      status_active=1
+    fi
+  }
+
   while :; do
     if [ -f "$OUTBOX_DIR/$id.md" ]; then
+      status_clear
       cat "$OUTBOX_DIR/$id.md"
       exit 0
     fi
     if [ -f "$FAILED_DIR/$id.md" ]; then
+      status_clear
       cat "$FAILED_DIR/$id.md"
       exit 1
     fi
     if [ -f "$output_file" ]; then
       break
     fi
+    if [ "$use_status" -eq 1 ] && [ -f "$status_file" ]; then
+      local line
+      line="$(tail -n 1 "$status_file" 2>/dev/null | tr -d '\r')"
+      if [ -n "$line" ] && [ "$line" != "$last_status" ]; then
+        status_print "thinking: $line"
+        last_status="$line"
+      fi
+    fi
     sleep 1
   done
 
+  status_clear
   tail -n +1 -f "$output_file" &
   local tail_pid=$!
 
@@ -536,10 +584,33 @@ follow_cmd() {
   declare -A seen_done
   declare -A seen_failed
   local done_seen=0
+  local use_status=0
+  local status_active=0
+  local last_status=""
+  local last_status_id=""
+  if [ -t 1 ] && [ "${FOLLOW_STATUS_LINE:-1}" != "0" ]; then
+    use_status=1
+  fi
+
+  status_clear() {
+    if [ "$use_status" -eq 1 ] && [ "$status_active" -eq 1 ]; then
+      printf '\r\033[K'
+      status_active=0
+    fi
+  }
+
+  status_print() {
+    local text="$1"
+    if [ "$use_status" -eq 1 ]; then
+      printf '\r\033[K%s' "$text"
+      status_active=1
+    fi
+  }
 
   shopt -s nullglob
   while :; do
     local activity=0
+    local working_ids=()
 
     local f id chain_id
     for f in "$INBOX_DIR"/*.json; do
@@ -547,6 +618,7 @@ follow_cmd() {
       if [ "$chain_id" = "$chain" ]; then
         id="$(jq -r '.id // empty' "$f" 2>/dev/null || true)"
         if [ -n "$id" ] && [ -z "${seen_queued[$id]:-}" ]; then
+          status_clear
           echo "queued $id"
           seen_queued["$id"]=1
           activity=1
@@ -558,7 +630,11 @@ follow_cmd() {
       chain_id="$(jq -r '.chain // empty' "$f" 2>/dev/null || true)"
       if [ "$chain_id" = "$chain" ]; then
         id="$(jq -r '.id // empty' "$f" 2>/dev/null || true)"
+        if [ -n "$id" ]; then
+          working_ids+=("$id")
+        fi
         if [ -n "$id" ] && [ -z "${seen_working[$id]:-}" ]; then
+          status_clear
           echo "working $id"
           seen_working["$id"]=1
           activity=1
@@ -575,6 +651,7 @@ follow_cmd() {
       if [ -f "$task_json" ]; then
         chain_id="$(jq -r '.chain // empty' "$task_json" 2>/dev/null || true)"
         if [ "$chain_id" = "$chain" ]; then
+          status_clear
           echo "done $id"
           cat "$f"
           echo
@@ -596,6 +673,7 @@ follow_cmd() {
       if [ -f "$task_json" ]; then
         chain_id="$(jq -r '.chain // empty' "$task_json" 2>/dev/null || true)"
         if [ "$chain_id" = "$chain" ]; then
+          status_clear
           echo "failed $id"
           cat "$f"
           echo
@@ -615,9 +693,41 @@ follow_cmd() {
         fi
       done
         if [ "$pending" -eq 0 ]; then
+        status_clear
         echo "chain $label completed"
         exit 0
       fi
+    fi
+
+    if [ "$use_status" -eq 1 ] && [ "${#working_ids[@]}" -gt 0 ]; then
+      local newest_ts=0
+      local newest_line=""
+      local newest_id=""
+      local wid
+      for wid in "${working_ids[@]}"; do
+        local file
+        file="$(status_file_for_task "$wid")"
+        if [ -f "$file" ]; then
+          local mtime
+          mtime="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
+          local line
+          line="$(tail -n 1 "$file" 2>/dev/null | tr -d '\r')"
+          if [ -n "$line" ] && [ "$mtime" -ge "$newest_ts" ]; then
+            newest_ts="$mtime"
+            newest_line="$line"
+            newest_id="$wid"
+          fi
+        fi
+      done
+      if [ -n "$newest_line" ] && { [ "$newest_line" != "$last_status" ] || [ "$newest_id" != "$last_status_id" ]; }; then
+        status_print "thinking (chain $label): $newest_line"
+        last_status="$newest_line"
+        last_status_id="$newest_id"
+      fi
+    elif [ "$use_status" -eq 1 ] && [ "$status_active" -eq 1 ]; then
+      status_clear
+      last_status=""
+      last_status_id=""
     fi
 
     if [ "$activity" -eq 0 ]; then
@@ -636,10 +746,34 @@ follow_all_cmd() {
   declare -A seen_working
   declare -A seen_done
   declare -A seen_failed
+  local use_status=0
+  local status_active=0
+  local last_status=""
+  local last_status_id=""
+  if [ -t 1 ] && [ "${FOLLOW_STATUS_LINE:-1}" != "0" ]; then
+    use_status=1
+  fi
+
+  status_clear() {
+    if [ "$use_status" -eq 1 ] && [ "$status_active" -eq 1 ]; then
+      printf '\r\033[K'
+      status_active=0
+    fi
+  }
+
+  status_print() {
+    local text="$1"
+    if [ "$use_status" -eq 1 ]; then
+      printf '\r\033[K%s' "$text"
+      status_active=1
+    fi
+  }
 
   shopt -s nullglob
   while :; do
     local activity=0
+    local working_ids=()
+    declare -A working_labels=()
 
     local f id chain_id label
     for f in "$INBOX_DIR"/*.json; do
@@ -649,6 +783,7 @@ follow_all_cmd() {
       session="$(jq -r '.session // empty' "$f" 2>/dev/null || true)"
       label="$(label_for_chain "$session" "$chain_id")"
       if [ -n "$id" ] && [ -z "${seen_queued[$id]:-}" ]; then
+        status_clear
         echo "queued $id (chain $label)"
         seen_queued["$id"]=1
         activity=1
@@ -661,7 +796,12 @@ follow_all_cmd() {
       local session
       session="$(jq -r '.session // empty' "$f" 2>/dev/null || true)"
       label="$(label_for_chain "$session" "$chain_id")"
+      if [ -n "$id" ]; then
+        working_ids+=("$id")
+        working_labels["$id"]="$label"
+      fi
       if [ -n "$id" ] && [ -z "${seen_working[$id]:-}" ]; then
+        status_clear
         echo "working $id (chain $label)"
         seen_working["$id"]=1
         activity=1
@@ -689,6 +829,7 @@ follow_all_cmd() {
         session="$(jq -r '.session // empty' "$task_json" 2>/dev/null || true)"
       fi
       label="$(label_for_chain "$session" "$chain_id")"
+      status_clear
       echo "done $id (chain $label)"
       cat "$f"
       echo
@@ -717,12 +858,45 @@ follow_all_cmd() {
         session="$(jq -r '.session // empty' "$task_json" 2>/dev/null || true)"
       fi
       label="$(label_for_chain "$session" "$chain_id")"
+      status_clear
       echo "failed $id (chain $label)"
       cat "$f"
       echo
       seen_failed["$id"]=1
       activity=1
     done
+
+    if [ "$use_status" -eq 1 ] && [ "${#working_ids[@]}" -gt 0 ]; then
+      local newest_ts=0
+      local newest_line=""
+      local newest_id=""
+      local wid
+      for wid in "${working_ids[@]}"; do
+        local file
+        file="$(status_file_for_task "$wid")"
+        if [ -f "$file" ]; then
+          local mtime
+          mtime="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
+          local line
+          line="$(tail -n 1 "$file" 2>/dev/null | tr -d '\r')"
+          if [ -n "$line" ] && [ "$mtime" -ge "$newest_ts" ]; then
+            newest_ts="$mtime"
+            newest_line="$line"
+            newest_id="$wid"
+          fi
+        fi
+      done
+      if [ -n "$newest_line" ] && { [ "$newest_line" != "$last_status" ] || [ "$newest_id" != "$last_status_id" ]; }; then
+        local label_text="${working_labels[$newest_id]:-manual}"
+        status_print "thinking (chain $label_text): $newest_line"
+        last_status="$newest_line"
+        last_status_id="$newest_id"
+      fi
+    elif [ "$use_status" -eq 1 ] && [ "$status_active" -eq 1 ]; then
+      status_clear
+      last_status=""
+      last_status_id=""
+    fi
 
     if [ "$activity" -eq 0 ]; then
       sleep "$poll"

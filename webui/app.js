@@ -101,6 +101,7 @@ const renderChains = (chains, activeId) => {
         <span class="status ${statusClass}">${chain.status}</span>
       </div>
       <div class="chain-title">${chain.title || "untitled chain"}</div>
+      ${chain.statusLine ? `<div class="chain-status">${chain.statusLine}</div>` : ""}
       <div class="chain-meta">
         <span class="chip">${chain.mode}</span>
         <span class="chip">${chain.scope || "workspace"}</span>
