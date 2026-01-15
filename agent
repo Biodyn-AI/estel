@@ -41,6 +41,13 @@ if [ "${1:-}" = "--verbose" ] || [ "${1:-}" = "-v" ]; then
   shift
 fi
 
+TARGET_DIR=""
+TARGET_MOUNT="/workspace/container"
+TARGET_OVERRIDE_FILE="${SESSION_DIR}/compose.override.yml"
+TARGET_STATE_FILE="${SESSION_DIR}/target"
+TARGET_CHANGED=0
+COMPOSE_ARGS=()
+
 compose_cmd=()
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   compose_cmd=(docker compose)
@@ -52,7 +59,8 @@ else
 fi
 
 compose() {
-  (cd "$ROOT" && LOCAL_UID="$HOST_UID" LOCAL_GID="$HOST_GID" "${compose_cmd[@]}" "$@")
+  setup_target
+  (cd "$ROOT" && LOCAL_UID="$HOST_UID" LOCAL_GID="$HOST_GID" "${compose_cmd[@]}" "${COMPOSE_ARGS[@]}" "$@")
 }
 
 compose_legacy_build() {
@@ -67,6 +75,58 @@ has_appledouble() {
   find "$ROOT" -name '._*' -type f -print -quit | grep -q .
 }
 
+yaml_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
+write_override_file() {
+  local host_path="$1"
+  local quoted
+  quoted="$(yaml_quote "$host_path")"
+  local code_flags="${AUTOAGENTS_CODEX_FLAGS:-${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C ${TARGET_MOUNT}}}"
+  local quoted_flags
+  quoted_flags="$(yaml_quote "$code_flags")"
+  mkdir -p "$SESSION_DIR"
+  cat > "$TARGET_OVERRIDE_FILE" <<EOF
+services:
+  agent:
+    volumes:
+      - ${quoted}:${TARGET_MOUNT}
+    environment:
+      CODEX_FLAGS: ${quoted_flags}
+  ui:
+    volumes:
+      - ${quoted}:${TARGET_MOUNT}
+    environment:
+      WORKSPACE: ${TARGET_MOUNT}
+EOF
+}
+
+setup_target() {
+  if [ -n "$TARGET_DIR" ]; then
+    return 0
+  fi
+  local base_dir
+  base_dir="${AUTOAGENTS_CONTAINER_ROOT:-$(pwd -P)}"
+  TARGET_DIR="${base_dir}/container"
+  if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
+    echo "container path exists and is not a directory: $TARGET_DIR" >&2
+    exit 1
+  fi
+  mkdir -p "$TARGET_DIR"
+  write_override_file "$TARGET_DIR"
+  COMPOSE_ARGS=(-f "$ROOT/docker-compose.yml" -f "$TARGET_OVERRIDE_FILE")
+
+  if [ -f "$TARGET_STATE_FILE" ]; then
+    local prev
+    prev="$(cat "$TARGET_STATE_FILE" 2>/dev/null || true)"
+    if [ -n "$prev" ] && [ "$prev" != "$TARGET_DIR" ]; then
+      TARGET_CHANGED=1
+    fi
+  fi
+  echo "$TARGET_DIR" > "$TARGET_STATE_FILE"
+}
+
 is_running() {
   local id
   id="$(compose ps --status running -q agent 2>/dev/null || true)"
@@ -74,6 +134,7 @@ is_running() {
 }
 
 ensure_running() {
+  setup_target
   if ! is_running; then
     cleanup_appledouble
     if has_appledouble; then
@@ -83,6 +144,8 @@ ensure_running() {
         compose_legacy_build up -d --build
       fi
     fi
+  elif [ "$TARGET_CHANGED" -eq 1 ]; then
+    compose up -d --build --force-recreate
   fi
 
   if ! is_running; then

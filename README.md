@@ -20,6 +20,9 @@ the host system isolated.
 ./agent
 ```
 
+AutoAgents uses a per‑directory workspace: when you launch from any folder, it
+creates or reuses `./container` in that folder and points Codex there.
+
 2) Log into Codex once (inside the container):
 
 ```
