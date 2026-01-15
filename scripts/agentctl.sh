@@ -11,6 +11,7 @@ RUNS_DIR="${QUEUE_DIR}/runs"
 SESSIONS_DIR="${QUEUE_DIR}/sessions"
 CHAINS_DIR="${QUEUE_DIR}/chains"
 STOP_FILE="${QUEUE_DIR}/STOP"
+AUTONOMOUS_CONTEXT_LIMIT="${AUTONOMOUS_CONTEXT_LIMIT:-4000}"
 
 ensure_dirs() {
   mkdir -p "$INBOX_DIR" "$WORKING_DIR" "$OUTBOX_DIR" "$FAILED_DIR" "$RUNS_DIR" "$SESSIONS_DIR" "$CHAINS_DIR"
@@ -22,6 +23,15 @@ new_id() {
 
 now_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+trim_context() {
+  local text="$1"
+  local limit="$2"
+  if [ -z "$text" ]; then
+    return 0
+  fi
+  printf '%s' "$text" | tail -c "$limit"
 }
 
 usage() {
@@ -297,6 +307,189 @@ purge_inbox_for_chain() {
     fi
   done
   echo "$removed"
+}
+
+chain_is_active() {
+  local chain_id="$1"
+  if [ -z "$chain_id" ]; then
+    return 1
+  fi
+  shopt -s nullglob
+  local f
+  for f in "$INBOX_DIR"/*.json "$WORKING_DIR"/*.json; do
+    local task_chain
+    task_chain="$(jq -r '.chain // empty' "$f" 2>/dev/null || true)"
+    if [ "$task_chain" = "$chain_id" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+manual_chain_active() {
+  local session="$1"
+  shopt -s nullglob
+  local f
+  for f in "$INBOX_DIR"/*.json "$WORKING_DIR"/*.json; do
+    local task_session task_mode
+    task_session="$(jq -r '.session // empty' "$f" 2>/dev/null || true)"
+    task_mode="$(jq -r '.mode // empty' "$f" 2>/dev/null || true)"
+    if [ "$task_session" = "$session" ] && [ "$task_mode" = "manual" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+chain_is_autonomous() {
+  local chain_id="$1"
+  if [ -z "$chain_id" ]; then
+    return 1
+  fi
+  shopt -s nullglob
+  local f
+  for f in "$RUNS_DIR"/*/task.json; do
+    local task_chain
+    task_chain="$(jq -r '.chain // empty' "$f" 2>/dev/null || true)"
+    if [ "$task_chain" = "$chain_id" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+latest_chain_run_id() {
+  local chain_id="$1"
+  local latest=""
+  if [ -z "$chain_id" ]; then
+    echo ""
+    return 0
+  fi
+  shopt -s nullglob
+  local f
+  for f in "$RUNS_DIR"/*/task.json; do
+    local task_chain
+    task_chain="$(jq -r '.chain // empty' "$f" 2>/dev/null || true)"
+    if [ "$task_chain" = "$chain_id" ]; then
+      local run_id
+      run_id="$(basename "$(dirname "$f")")"
+      if [ -z "$latest" ] || [ "$run_id" \> "$latest" ]; then
+        latest="$run_id"
+      fi
+    fi
+  done
+  echo "$latest"
+}
+
+extract_result_from_output() {
+  local output_file="$1"
+  if [ ! -f "$output_file" ]; then
+    return 0
+  fi
+  if grep -q '^[[:space:]]*BEGIN_RESULT[[:space:]]*$' "$output_file"; then
+    awk 'BEGIN{f=0} /^[[:space:]]*BEGIN_RESULT[[:space:]]*$/{f=1; next} /^[[:space:]]*END_RESULT[[:space:]]*$/{exit} f{print}' "$output_file"
+    return 0
+  fi
+  awk 'BEGIN{f=0} /^RESULT:/{f=1; next} /^NEXT_TASK:/{exit} /^DONE[[:space:]]*$/{exit} f{print}' "$output_file"
+}
+
+chain_last_context() {
+  local run_id="$1"
+  if [ -z "$run_id" ]; then
+    echo ""
+    return 0
+  fi
+  local output_file=""
+  if [ -f "$RUNS_DIR/$run_id/output.txt" ]; then
+    output_file="$RUNS_DIR/$run_id/output.txt"
+  elif [ -f "$OUTBOX_DIR/$run_id.md" ]; then
+    output_file="$OUTBOX_DIR/$run_id.md"
+  fi
+  if [ -z "$output_file" ]; then
+    echo ""
+    return 0
+  fi
+  local result
+  result="$(extract_result_from_output "$output_file")"
+  if [ -z "$result" ]; then
+    result="$(cat "$output_file")"
+  fi
+  trim_context "$result" "$AUTONOMOUS_CONTEXT_LIMIT"
+}
+
+queue_manual_task() {
+  local prompt="$1"
+  local session="$2"
+  local verbose="${3:-0}"
+  local id
+  id="$(new_id)"
+  jq -n \
+    --arg id "$id" \
+    --arg mode "manual" \
+    --arg prompt "$prompt" \
+    --arg session "$session" \
+    --arg created "$(now_utc)" \
+    --argjson verbose "$verbose" \
+    '{id:$id,mode:$mode,prompt:$prompt,session:$session,verbose:$verbose,created:$created}' \
+    > "$INBOX_DIR/$id.json"
+  echo "$id"
+}
+
+reactivate_chain_if_needed() {
+  local chain_id="$1"
+  local note="$2"
+  if [ -z "$chain_id" ] || [ -z "$note" ]; then
+    return 0
+  fi
+
+  if chain_is_autonomous "$chain_id"; then
+    if chain_is_active "$chain_id"; then
+      return 0
+    fi
+    local last_id
+    last_id="$(latest_chain_run_id "$chain_id")"
+    if [ -z "$last_id" ]; then
+      return 0
+    fi
+    local task_file="$RUNS_DIR/$last_id/task.json"
+    local goal session context
+    goal="$(jq -r '.goal // empty' "$task_file" 2>/dev/null || true)"
+    session="$(jq -r '.session // empty' "$task_file" 2>/dev/null || true)"
+    context="$(chain_last_context "$last_id")"
+    if [ -z "$goal" ]; then
+      goal="$note"
+    fi
+    rm -f "$(chain_stop_file "$chain_id")"
+    local new_id
+    new_id="$(new_id)"
+    jq -n \
+      --arg id "$new_id" \
+      --arg mode "autonomous" \
+      --arg chain "$chain_id" \
+      --arg parent "$last_id" \
+      --arg goal "$goal" \
+      --arg task "$note" \
+      --arg context "$context" \
+      --arg session "$session" \
+      --arg created "$(now_utc)" \
+      '{id:$id,mode:$mode,chain:$chain,parent:$parent,goal:$goal,task:$task,context:$context,session:$session,created:$created}' \
+      > "$INBOX_DIR/$new_id.json"
+    echo "chain reactivated"
+    return 0
+  fi
+
+  local session
+  session="$(session_for_chain "$chain_id")"
+  if [ -z "$session" ] && [ -n "${AGENT_SESSION:-}" ]; then
+    session="$AGENT_SESSION"
+  fi
+  if manual_chain_active "$session"; then
+    return 0
+  fi
+  rm -f "$(chain_stop_file "$chain_id")"
+  local new_id
+  new_id="$(queue_manual_task "$note" "$session" 0)"
+  echo "manual chain reactivated ($new_id)"
 }
 
 submit_cmd() {
@@ -1007,7 +1200,9 @@ chain_append_cmd() {
   echo "note appended"
   if note_requests_stop "$note"; then
     chain_stop_cmd "$id"
+    return 0
   fi
+  reactivate_chain_if_needed "$id" "$note"
 }
 
 chain_clear_cmd() {
