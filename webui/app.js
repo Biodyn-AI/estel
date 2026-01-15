@@ -21,6 +21,8 @@ const replInput = document.getElementById("replInput");
 const replSend = document.getElementById("replSend");
 const stopCurrent = document.getElementById("stopCurrent");
 const followAll = document.getElementById("followAll");
+const metaContainer = document.getElementById("metaContainer");
+const metaSession = document.getElementById("metaSession");
 const workspace = document.getElementById("workspace");
 const paneTree = document.getElementById("paneTree");
 const paneEditor = document.getElementById("paneEditor");
@@ -198,6 +200,16 @@ const renderRepl = (lines) => {
     replBody.appendChild(entry);
   });
   replBody.scrollTop = replBody.scrollHeight;
+};
+
+const updateMeta = (meta) => {
+  if (!meta) return;
+  if (metaContainer) {
+    metaContainer.textContent = `container: ${meta.container || "--"}`;
+  }
+  if (metaSession) {
+    metaSession.textContent = `session: ${meta.session || "--"}`;
+  }
 };
 
 const updateEditorControls = () => {
@@ -525,6 +537,7 @@ const refreshState = async () => {
     const data = await fetchJson("/api/state");
     renderChains(data.chains || [], data.activeChain || null);
     renderRepl(data.repl || []);
+    updateMeta(data.meta || {});
   } catch (err) {
     console.error(err);
   }
@@ -540,6 +553,7 @@ const startStream = () => {
       const data = JSON.parse(event.data);
       renderChains(data.chains || [], data.activeChain || null);
       renderRepl(data.repl || []);
+      updateMeta(data.meta || {});
     } catch (err) {
       console.error(err);
     }

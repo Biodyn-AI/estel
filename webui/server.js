@@ -71,6 +71,15 @@ const readStatusLine = (id) => {
   return content[content.length - 1] || "";
 };
 
+const loadMeta = () => {
+  const stopFile = path.join(QUEUE_DIR, "STOP");
+  const status = fs.existsSync(stopFile) ? "paused" : "running";
+  return {
+    container: status,
+    session: UI_SESSION,
+  };
+};
+
 const resolveWorkspacePath = (requestedPath) => {
   const cleaned = requestedPath ? requestedPath.trim() : "";
   const resolved = cleaned
@@ -128,7 +137,8 @@ const getStatePayload = () => {
   const chains = buildChains(tasks);
   const activeChain = loadActiveChainId(chains);
   const repl = loadReplLines();
-  return { chains, activeChain, repl };
+  const meta = loadMeta();
+  return { chains, activeChain, repl, meta };
 };
 
 const broadcast = (event, payload) => {
