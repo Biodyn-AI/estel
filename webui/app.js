@@ -48,6 +48,7 @@ let latestActiveChain = null;
 let chainDetails = null;
 let chainDetailsLoading = null;
 const chainDetailsCache = new Map();
+let showActiveOnly = false;
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -112,6 +113,12 @@ const statusClassFor = (status) =>
     done: "done",
     failed: "failed",
   }[status || "queued"]);
+
+const isActiveChain = (chain) =>
+  chain && (chain.status === "working" || chain.status === "queued");
+
+const getVisibleChains = () =>
+  showActiveOnly ? latestChains.filter(isActiveChain) : latestChains;
 
 const formatTimestamp = (value) => {
   if (!value) return "";
@@ -311,8 +318,15 @@ const buildChainDetailContent = (chainId) => {
 
 const renderChainDetails = () => {
   if (!codePane || !codePath) return;
-  const chains = latestChains || [];
-  const selectedId = chains.length ? getPreferredChainId() : null;
+  const allChains = latestChains || [];
+  const chains = getVisibleChains();
+  let selectedId = chains.length ? getPreferredChainId() : null;
+  if (selectedId && !chains.some((chain) => chain.id === selectedId)) {
+    selectedId = chains[0]?.id || null;
+  }
+  if (selectedId && selectedChainId !== selectedId) {
+    selectedChainId = selectedId;
+  }
 
   const browser = document.createElement("div");
   browser.className = "chain-browser";
@@ -320,11 +334,34 @@ const renderChainDetails = () => {
   const list = document.createElement("div");
   list.className = "chain-browser-list";
 
+  const filterRow = document.createElement("div");
+  filterRow.className = "chain-browser-filter";
+  const filterLabel = document.createElement("span");
+  filterLabel.textContent = showActiveOnly ? "Active only" : "All chains";
+  const filterToggle = document.createElement("button");
+  filterToggle.type = "button";
+  filterToggle.className = `ghost filter-toggle${showActiveOnly ? " active" : ""}`;
+  filterToggle.textContent = showActiveOnly ? "Show all" : "Show active";
+  filterToggle.addEventListener("click", () => {
+    showActiveOnly = !showActiveOnly;
+    chainDetails = null;
+    renderCode();
+    refreshChainDetails();
+  });
+  filterRow.appendChild(filterLabel);
+  filterRow.appendChild(filterToggle);
+  list.appendChild(filterRow);
+
+  const items = document.createElement("div");
+  items.className = "chain-browser-items";
+
   if (!chains.length) {
     const empty = document.createElement("div");
     empty.className = "chain-empty";
-    empty.textContent = "No chains yet. Create one to get started.";
-    list.appendChild(empty);
+    empty.textContent = showActiveOnly
+      ? "No active chains right now."
+      : "No chains yet. Create one to get started.";
+    items.appendChild(empty);
   } else {
     chains.forEach((chain) => {
       const item = document.createElement("button");
@@ -344,13 +381,15 @@ const renderChainDetails = () => {
       item.addEventListener("click", () => {
         selectChainForDetails(chain.id);
       });
-      list.appendChild(item);
+      items.appendChild(item);
     });
   }
 
+  list.appendChild(items);
+
   const detail = document.createElement("div");
   detail.className = "chain-browser-detail";
-  if (!chains.length) {
+  if (!allChains.length) {
     codePath.textContent = "Chains";
     const emptyDetail = document.createElement("div");
     emptyDetail.className = "chain-empty";

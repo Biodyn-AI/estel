@@ -432,12 +432,40 @@ body.resizing-horizontal {
 .chain-browser-list {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.chain-browser-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+
+.filter-toggle.active {
+  background: rgba(30, 123, 109, 0.14);
+  color: var(--accent-2);
+  border: 1px solid transparent;
+}
+
+.chain-browser-items {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   overflow: auto;
   min-height: 0;
-  padding-right: 0;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
+  flex: 1;
+  padding: 12px;
 }
 
 .chain-browser-detail {
