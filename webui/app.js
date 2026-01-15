@@ -50,6 +50,14 @@ const postJson = async (url, payload) => {
   });
 };
 
+const putJson = async (url, payload) => {
+  return fetchJson(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+};
+
 const setMode = (mode) => {
   currentMode = mode;
   modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === mode));
@@ -454,18 +462,18 @@ if (chainList) {
   });
 }
 
-if (createButton) {
-  createButton.addEventListener("click", async () => {
-    const prompt = chainPrompt ? chainPrompt.value.trim() : "";
-    if (!prompt) return;
-    try {
-      await postJson("/api/chains", { mode: currentMode, prompt });
-      if (chainPrompt) chainPrompt.value = "";
-    } catch (err) {
-      console.error(err);
-    }
-  });
-}
+  if (createButton) {
+    createButton.addEventListener("click", async () => {
+      const prompt = chainPrompt ? chainPrompt.value.trim() : "";
+      if (!prompt) return;
+      try {
+        await postJson("/api/chains", { mode: currentMode, prompt });
+        if (chainPrompt) chainPrompt.value = "";
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  }
 
 if (replSend) {
   replSend.addEventListener("click", async () => {
@@ -516,7 +524,7 @@ if (saveFile) {
     const textarea = codePane?.querySelector("textarea");
     if (!textarea) return;
     try {
-      await postJson("/api/file", {
+      await putJson("/api/file", {
         path: currentFile.path,
         content: textarea.value,
       });
@@ -539,6 +547,7 @@ if (newFile) {
     const target = base ? `${base}/${name}` : name;
     try {
       await postJson("/api/fs/create-file", { path: target, content: "" });
+      if (base) openFolders.add(base);
       selectedPath = target;
       selectedType = "file";
       activeFilePath = target;
@@ -564,6 +573,7 @@ if (newFolder) {
       await postJson("/api/fs/create-folder", { path: target });
       selectedPath = target;
       selectedType = "folder";
+      if (base) openFolders.add(base);
       openFolders.add(target);
       await refreshTreeState();
     } catch (err) {
@@ -588,6 +598,20 @@ if (renamePath) {
       if (activeFilePath === fromPath) {
         activeFilePath = target;
       }
+      if (selectedType === "folder") {
+        const updated = new Set();
+        openFolders.forEach((folder) => {
+          if (folder === fromPath) {
+            updated.add(target);
+          } else if (folder.startsWith(`${fromPath}/`)) {
+            updated.add(folder.replace(fromPath, target));
+          } else {
+            updated.add(folder);
+          }
+        });
+        openFolders.clear();
+        updated.forEach((folder) => openFolders.add(folder));
+      }
       await refreshTreeState();
       if (selectedType === "file") {
         const data = await fetchJson(`/api/file?path=${encodeURIComponent(target)}`);
@@ -605,11 +629,12 @@ if (renamePath) {
 if (deletePath) {
   deletePath.addEventListener("click", async () => {
     if (!selectedPath) return;
+    const pathToDelete = selectedPath;
     const ok = window.confirm(`Delete ${selectedPath}?`);
     if (!ok) return;
     try {
-      await postJson("/api/fs/delete", { path: selectedPath });
-      if (activeFilePath === selectedPath) {
+      await postJson("/api/fs/delete", { path: pathToDelete });
+      if (activeFilePath === pathToDelete) {
         activeFilePath = "";
         currentFile = null;
         editMode = false;
@@ -618,6 +643,13 @@ if (deletePath) {
       }
       selectedPath = "";
       selectedType = "";
+      if (pathToDelete) {
+        openFolders.forEach((folder) => {
+          if (folder === pathToDelete || folder.startsWith(`${pathToDelete}/`)) {
+            openFolders.delete(folder);
+          }
+        });
+      }
       await refreshTreeState();
     } catch (err) {
       console.error(err);

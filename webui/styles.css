@@ -24,6 +24,11 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: var(--sans);
@@ -31,13 +36,13 @@ body {
   background: radial-gradient(circle at 20% 20%, #fff7e2 0%, transparent 55%),
     radial-gradient(circle at 80% 10%, #e2f4f0 0%, transparent 55%),
     linear-gradient(145deg, var(--bg), var(--bg-2));
-  min-height: 100vh;
+  overflow: hidden;
 }
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: 100vh;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
   gap: 12px;
   padding: 16px;
 }
@@ -120,6 +125,7 @@ body {
   grid-template-columns: minmax(220px, 1fr) minmax(420px, 2.6fr) minmax(280px, 1.2fr);
   gap: 16px;
   align-items: stretch;
+  min-height: 0;
 }
 
 .pane {
@@ -196,6 +202,18 @@ body {
 .repl-body {
   padding: 16px;
   overflow: auto;
+  min-height: 0;
+}
+
+.tree-body,
+.editor-body,
+.repl-body {
+  flex: 1;
+}
+
+.agents-body {
+  flex: 1;
+  overflow: hidden;
 }
 
 .tree-actions {
@@ -301,7 +319,8 @@ body {
   color: #ecf1f3;
   border-radius: var(--radius-md);
   padding: 18px;
-  min-height: 260px;
+  min-height: 0;
+  flex: 1;
   overflow: auto;
 }
 
@@ -422,6 +441,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
 }
 
 .chain-item {
@@ -511,6 +533,7 @@ body {
 
 .repl {
   min-height: 220px;
+  max-height: 280px;
 }
 
 .repl-body {
@@ -523,6 +546,7 @@ body {
   border-radius: var(--radius-md);
   margin: 0 16px 16px;
   padding: 16px;
+  min-height: 0;
 }
 
 .repl-line {
@@ -587,6 +611,12 @@ body {
   }
   .chain-actions {
     grid-template-columns: 1fr;
+  }
+  body {
+    overflow: auto;
+  }
+  .app {
+    height: auto;
   }
 }
 
