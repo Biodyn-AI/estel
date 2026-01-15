@@ -203,6 +203,10 @@ write_override_file() {
   local code_flags="${AUTOAGENTS_CODEX_FLAGS:-${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C ${TARGET_MOUNT}}}"
   local quoted_flags
   quoted_flags="$(yaml_quote "$code_flags")"
+  local quoted_mount
+  quoted_mount="$(yaml_quote "$TARGET_MOUNT")"
+  local quoted_host_path
+  quoted_host_path="$(yaml_quote "$host_path")"
   mkdir -p "$SESSION_DIR"
   cat > "$TARGET_OVERRIDE_FILE" <<EOF
 services:
@@ -211,11 +215,13 @@ services:
       - ${quoted_volume}
     environment:
       CODEX_FLAGS: ${quoted_flags}
+      AGENT_WORKDIR: ${quoted_mount}
   ui:
     volumes:
       - ${quoted_volume}
     environment:
-      WORKSPACE: ${TARGET_MOUNT}
+      WORKSPACE: ${quoted_mount}
+      UI_WORKSPACE_HOST: ${quoted_host_path}
 EOF
 }
 

@@ -152,6 +152,17 @@ body[data-theme="dark"] .topbar {
   background: var(--panel-2);
 }
 
+.pill.workspace {
+  max-width: 360px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--mono);
+}
+
 .pill.alt {
   border-color: transparent;
   background: rgba(30, 123, 109, 0.16);

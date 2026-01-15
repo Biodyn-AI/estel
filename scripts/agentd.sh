@@ -22,6 +22,7 @@ CODEX_FLAGS="${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C /works
 CODEX_EXEC_FLAGS="${CODEX_EXEC_FLAGS:---skip-git-repo-check}"
 AGENT_VERBOSE="${AGENT_VERBOSE:-0}"
 CODEX_EXEC_MODE="${CODEX_EXEC_MODE:-stdin}"
+AGENT_WORKDIR="${AGENT_WORKDIR:-}"
 AUTONOMOUS_CONTEXT_LIMIT="${AUTONOMOUS_CONTEXT_LIMIT:-4000}"
 CHAIN_SUMMARY_LIMIT="${CHAIN_SUMMARY_LIMIT:-1200}"
 SESSION_CONTEXT_LIMIT="${SESSION_CONTEXT_LIMIT:-8000}"
@@ -79,6 +80,76 @@ update_status_file() {
   fi
   printf '%s\n' "$line" > "$file"
 }
+
+normalize_codex_flags() {
+  if [ -z "$AGENT_WORKDIR" ]; then
+    return 0
+  fi
+  local -a filtered=()
+  local skip_next=0
+  local token
+  for token in $CODEX_FLAGS; do
+    if [ "$skip_next" -eq 1 ]; then
+      skip_next=0
+      continue
+    fi
+    case "$token" in
+      -C|--cd)
+        skip_next=1
+        continue
+        ;;
+      -C*|--cd=*)
+        continue
+        ;;
+    esac
+    filtered+=("$token")
+  done
+  CODEX_FLAGS="-C $AGENT_WORKDIR"
+  if [ "${#filtered[@]}" -gt 0 ]; then
+    CODEX_FLAGS+=" ${filtered[*]}"
+  fi
+}
+
+resolve_workdir_hint() {
+  if [ -n "$AGENT_WORKDIR" ]; then
+    printf '%s' "$AGENT_WORKDIR"
+    return 0
+  fi
+  local prev=""
+  local token
+  for token in $CODEX_FLAGS; do
+    case "$token" in
+      -C)
+        prev="-C"
+        continue
+        ;;
+      --cd)
+        prev="--cd"
+        continue
+        ;;
+      -C*)
+        printf '%s' "${token#-C}"
+        return 0
+        ;;
+      --cd=*)
+        printf '%s' "${token#--cd=}"
+        return 0
+        ;;
+    esac
+    if [ "$prev" = "-C" ] || [ "$prev" = "--cd" ]; then
+      printf '%s' "$token"
+      return 0
+    fi
+    prev=""
+  done
+  if [ -n "$WORKSPACE" ]; then
+    printf '%s' "$WORKSPACE"
+  fi
+  return 0
+}
+
+normalize_codex_flags
+WORKDIR_HINT="$(resolve_workdir_hint)"
 
 log() {
   local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
@@ -201,6 +272,11 @@ You are continuing a multi-turn conversation. Reply as the assistant.
 CONVERSATION_HISTORY:
 ${history:-<none>}
 
+WORKSPACE_ROOT:
+${WORKDIR_HINT:-$WORKSPACE}
+
+Use the workspace root for file operations unless instructed otherwise. If you run commands, `cd` into WORKSPACE_ROOT first.
+
 USER:
 $user_prompt
 
@@ -258,6 +334,11 @@ build_autonomous_prompt() {
   cat <<EOF
 You are running in an autonomous loop using the Codex CLI.
 
+WORKSPACE_ROOT:
+${WORKDIR_HINT:-$WORKSPACE}
+
+Use the workspace root for file operations unless instructed otherwise. If you run commands, `cd` into WORKSPACE_ROOT first.
+
 GOAL:
 $goal
 
@@ -300,6 +381,11 @@ build_next_task_prompt() {
 
   cat <<EOF
 You are continuing an autonomous chain. The previous step did not provide a next task.
+
+WORKSPACE_ROOT:
+${WORKDIR_HINT:-$WORKSPACE}
+
+Use the workspace root for file operations unless instructed otherwise. If you run commands, `cd` into WORKSPACE_ROOT first.
 
 GOAL:
 $goal

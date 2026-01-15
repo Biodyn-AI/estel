@@ -9,6 +9,7 @@ const WORKSPACE = process.env.WORKSPACE || "/workspace";
 const QUEUE_DIR = process.env.QUEUE_DIR || path.join(WORKSPACE, "queue");
 const LOG_FILE = process.env.LOG_FILE || path.join(WORKSPACE, "logs", "agentd.log");
 const UI_SESSION = process.env.UI_SESSION || "webui";
+const WORKSPACE_HOST = process.env.UI_WORKSPACE_HOST || "";
 const STATIC_DIR = process.env.UI_STATIC_DIR || path.join("/workspace", "webui");
 const PORT = Number(process.env.UI_PORT || process.env.PORT || 5177);
 const TREE_SKIP = new Set([".git", "node_modules"]);
@@ -79,6 +80,7 @@ const loadMeta = () => {
   return {
     container: status,
     session: UI_SESSION,
+    workspace: WORKSPACE_HOST || WORKSPACE,
   };
 };
 

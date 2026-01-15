@@ -28,6 +28,7 @@ const noteChain = document.getElementById("noteChain");
 const followAll = document.getElementById("followAll");
 const metaContainer = document.getElementById("metaContainer");
 const metaSession = document.getElementById("metaSession");
+const metaWorkspace = document.getElementById("metaWorkspace");
 const themeToggle = document.getElementById("themeToggle");
 const workspacePicker = document.getElementById("workspacePicker");
 const noteModal = document.getElementById("noteModal");
@@ -991,6 +992,11 @@ const updateMeta = (meta) => {
   if (metaSession) {
     metaSession.textContent = `session: ${meta.session || "--"}`;
   }
+  if (metaWorkspace) {
+    const value = meta.workspace || "--";
+    metaWorkspace.textContent = `workspace: ${value}`;
+    metaWorkspace.title = value !== "--" ? value : "";
+  }
 };
 
 const updateEditorControls = () => {
@@ -1250,11 +1256,21 @@ const initSplitters = () => {
     dragState.middle = paneEditor.getBoundingClientRect().width;
     dragState.right = paneAgents.getBoundingClientRect().width;
     if (paneRepl && workspace && appRoot && topbar) {
+      const appStyle = window.getComputedStyle(appRoot);
+      const padTop = parseFloat(appStyle.paddingTop || "0") || 0;
+      const padBottom = parseFloat(appStyle.paddingBottom || "0") || 0;
+      const topbarStyle = window.getComputedStyle(topbar);
+      const topMarginTop = parseFloat(topbarStyle.marginTop || "0") || 0;
+      const topMarginBottom = parseFloat(topbarStyle.marginBottom || "0") || 0;
       dragState.workspaceHeight = workspace.getBoundingClientRect().height;
       dragState.replHeight = paneRepl.getBoundingClientRect().height;
       dragState.availableHeight =
         appRoot.clientHeight -
+        padTop -
+        padBottom -
         topbar.getBoundingClientRect().height -
+        topMarginTop -
+        topMarginBottom -
         splitterHorizontal.offsetHeight;
     }
     document.body.classList.add("resizing");
