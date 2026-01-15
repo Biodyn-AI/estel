@@ -4,7 +4,7 @@ const codePath = document.getElementById("codePath");
 const codeBadge = document.getElementById("codeBadge");
 const editToggle = document.getElementById("editToggle");
 const saveFile = document.getElementById("saveFile");
-const viewToggle = document.getElementById("viewToggle");
+const viewButtons = Array.from(document.querySelectorAll(".view-button"));
 const newFile = document.getElementById("newFile");
 const newFolder = document.getElementById("newFolder");
 const renamePath = document.getElementById("renamePath");
@@ -49,6 +49,9 @@ let chainDetails = null;
 let chainDetailsLoading = null;
 const chainDetailsCache = new Map();
 let showActiveOnly = false;
+let statsSnapshot = null;
+let statsLoading = null;
+const statsCache = new Map();
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -144,18 +147,17 @@ const selectChainForDetails = (chainId) => {
 
 const setEditorView = (view) => {
   editorView = view;
-  if (viewToggle) {
-    viewToggle.textContent = view === "file" ? "Chains" : "File";
-  }
-  if (view === "chain") {
+  viewButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === view);
+  });
+  if (view !== "file") {
     editMode = false;
     isDirty = false;
   }
   updateEditorControls();
   renderCode();
-  if (view === "chain") {
-    refreshChainDetails();
-  }
+  refreshChainDetails();
+  refreshStats();
 };
 
 const refreshChainDetails = async () => {
@@ -184,6 +186,151 @@ const refreshChainDetails = async () => {
     chainDetailsLoading = null;
     renderCode();
   }
+};
+
+const refreshStats = async () => {
+  if (editorView !== "stats") return;
+  const cached = statsCache.get("stats");
+  if (cached && Date.now() - cached.fetchedAt < 1500) {
+    statsSnapshot = cached.data;
+    renderCode();
+    return;
+  }
+  if (statsLoading) return;
+  statsLoading = true;
+  try {
+    const data = await fetchJson("/api/stats");
+    statsSnapshot = data;
+    statsCache.set("stats", { data, fetchedAt: Date.now() });
+  } catch (err) {
+    console.error(err);
+  } finally {
+    statsLoading = false;
+    renderCode();
+  }
+};
+
+const formatDuration = (ms) => {
+  if (!ms && ms !== 0) return "--";
+  const sec = Math.round(ms / 1000);
+  const hours = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const seconds = sec % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+};
+
+const formatNumber = (value) => {
+  if (value === null || value === undefined) return "--";
+  if (typeof value !== "number" || Number.isNaN(value)) return "--";
+  return value.toLocaleString();
+};
+
+const renderStatsView = () => {
+  if (!codePane || !codePath) return;
+  codePath.textContent = "Statistics";
+
+  if (!statsSnapshot) {
+    const loading = document.createElement("div");
+    loading.className = "code-empty";
+    loading.textContent = "Loading statistics...";
+    codePane.appendChild(loading);
+    return;
+  }
+
+  const totals = statsSnapshot.totals || {};
+  const chains = statsSnapshot.chains || [];
+
+  const summary = document.createElement("div");
+  summary.className = "stats-summary";
+
+  const addCard = (title, value, sub) => {
+    const card = document.createElement("div");
+    card.className = "stat-card";
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    const val = document.createElement("div");
+    val.className = "stat-value";
+    val.textContent = value;
+    card.appendChild(heading);
+    card.appendChild(val);
+    if (sub) {
+      const subText = document.createElement("div");
+      subText.className = "stat-sub";
+      subText.textContent = sub;
+      card.appendChild(subText);
+    }
+    summary.appendChild(card);
+  };
+
+  addCard(
+    "Chains",
+    formatNumber(totals.chainCount || 0),
+    `${formatNumber(totals.activeChains || 0)} active`
+  );
+  addCard(
+    "Runs",
+    formatNumber(totals.runCount || 0),
+    `${formatNumber(totals.activeRuns || 0)} active`
+  );
+  addCard(
+    "Tokens",
+    formatNumber(totals.tokensTotal || 0),
+    totals.tokensAvg ? `avg ${formatNumber(totals.tokensAvg)} / run` : "avg --"
+  );
+  addCard(
+    "Duration",
+    formatDuration(totals.durationTotalMs || 0),
+    totals.durationAvgMs ? `avg ${formatDuration(totals.durationAvgMs)}` : "avg --"
+  );
+
+  const listTitle = document.createElement("div");
+  listTitle.className = "stats-section-title";
+  listTitle.textContent = "Chains breakdown";
+
+  const table = document.createElement("div");
+  table.className = "stats-table";
+  if (!chains.length) {
+    const empty = document.createElement("div");
+    empty.className = "chain-empty";
+    empty.textContent = "No chains to summarize yet.";
+    table.appendChild(empty);
+  } else {
+    chains.forEach((chain) => {
+      const row = document.createElement("div");
+      row.className = "stats-row";
+
+      const title = document.createElement("div");
+      title.className = "stats-row-title";
+      const left = document.createElement("span");
+      left.textContent = `${chain.displayId || "--"} · ${chain.title || "untitled chain"}`;
+      const right = document.createElement("span");
+      right.textContent = chain.status || "--";
+      title.appendChild(left);
+      title.appendChild(right);
+
+      const meta = document.createElement("div");
+      meta.className = "stats-row-meta";
+      meta.innerHTML = `
+        <span>mode: ${chain.mode || "--"}</span>
+        <span>runs: ${formatNumber(chain.runCount || 0)}</span>
+        <span>active: ${formatNumber(chain.activeRuns || 0)}</span>
+        <span>done: ${formatNumber(chain.doneRuns || 0)}</span>
+        <span>failed: ${formatNumber(chain.failedRuns || 0)}</span>
+        <span>tokens: ${formatNumber(chain.tokensTotal || 0)}</span>
+        <span>avg run: ${chain.durationAvgMs ? formatDuration(chain.durationAvgMs) : "--"}</span>
+      `;
+
+      row.appendChild(title);
+      row.appendChild(meta);
+      table.appendChild(row);
+    });
+  }
+
+  codePane.appendChild(summary);
+  codePane.appendChild(listTitle);
+  codePane.appendChild(table);
 };
 
 const buildChainDetailContent = (chainId) => {
@@ -515,8 +662,8 @@ const updateMeta = (meta) => {
 
 const updateEditorControls = () => {
   if (!codeBadge || !editToggle || !saveFile) return;
-  if (editorView === "chain") {
-    codeBadge.textContent = "chain";
+  if (editorView !== "file") {
+    codeBadge.textContent = editorView === "stats" ? "stats" : "chain";
     editToggle.disabled = true;
     saveFile.disabled = true;
     editToggle.textContent = "Edit";
@@ -554,10 +701,17 @@ const updateEditorControls = () => {
 const renderCode = () => {
   if (!codePane || !codePath) return;
   codePane.innerHTML = "";
-  codePane.classList.toggle("chain-view", editorView === "chain");
+  const isChainView = editorView === "chain";
+  const isStatsView = editorView === "stats";
+  codePane.classList.toggle("chain-view", isChainView);
+  codePane.classList.toggle("stats-view", isStatsView);
 
-  if (editorView === "chain") {
+  if (isChainView) {
     renderChainDetails();
+    return;
+  }
+  if (isStatsView) {
+    renderStatsView();
     return;
   }
 
@@ -845,9 +999,8 @@ const handleState = (data) => {
   renderChains(data.chains || [], data.activeChain || null);
   renderRepl(data.repl || []);
   updateMeta(data.meta || {});
-  if (editorView === "chain") {
-    refreshChainDetails();
-  }
+  refreshChainDetails();
+  refreshStats();
 };
 
 const refreshState = async () => {
@@ -939,9 +1092,12 @@ if (chainList) {
   });
 }
 
-if (viewToggle) {
-  viewToggle.addEventListener("click", () => {
-    setEditorView(editorView === "file" ? "chain" : "file");
+if (viewButtons.length) {
+  viewButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.view || "file";
+      setEditorView(view);
+    });
   });
 }
 

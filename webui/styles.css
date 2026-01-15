@@ -350,6 +350,15 @@ body.resizing-horizontal {
   align-items: center;
 }
 
+.view-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.view-toggle .tab {
+  padding: 6px 10px;
+}
+
 .code {
   font-family: var(--mono);
   background: #171a1e;
@@ -371,6 +380,19 @@ body.resizing-horizontal {
   display: flex;
   flex-direction: column;
   padding: 0;
+}
+
+.code.stats-view {
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.67rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  min-height: 0;
 }
 
 .code textarea,
@@ -473,6 +495,85 @@ body.resizing-horizontal {
   min-height: 0;
   padding-right: 0;
   padding-left: 0;
+}
+
+.stats-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-card h4 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stats-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.stats-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.stats-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: #fffdf7;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stats-row-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-row-title span {
+  font-weight: 600;
+}
+
+.stats-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .chain-browser .chain-item {

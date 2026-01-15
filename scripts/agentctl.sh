@@ -44,6 +44,7 @@ Usage:
   agentctl chain-resume <chain-id>
   agentctl chain-resume-all
   agentctl list
+  agentctl stats [--json] [--session <id>] [--active-only]
   agentctl status <id>
   agentctl wait [--no-stream] <id>
   agentctl output <id>
@@ -448,6 +449,50 @@ list_cmd() {
     id="$(basename "$f" .md)"
     echo "failed $id"
   done
+}
+
+stats_cmd() {
+  local format="text"
+  local session=""
+  local active_only=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json)
+        format="json"
+        shift
+        ;;
+      --session)
+        session="${2:-}"
+        shift 2
+        ;;
+      --active-only)
+        active_only=1
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  local script="$WORKSPACE/webui/stats.js"
+  if [ ! -f "$script" ]; then
+    echo "stats module not found: $script" >&2
+    exit 1
+  fi
+
+  local args=()
+  if [ "$format" = "json" ]; then
+    args+=("--json")
+  fi
+  if [ -n "$session" ]; then
+    args+=("--session" "$session")
+  fi
+  if [ "$active_only" -eq 1 ]; then
+    args+=("--active-only")
+  fi
+
+  node "$script" "${args[@]}"
 }
 
 status_cmd() {
@@ -1102,6 +1147,10 @@ case "${1:-}" in
     ;;
   list)
     list_cmd
+    ;;
+  stats)
+    shift
+    stats_cmd "$@"
     ;;
   status)
     shift

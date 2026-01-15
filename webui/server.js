@@ -3,6 +3,7 @@ const url = require("url");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { collectStats } = require("./stats");
 
 const WORKSPACE = process.env.WORKSPACE || "/workspace";
 const QUEUE_DIR = process.env.QUEUE_DIR || path.join(WORKSPACE, "queue");
@@ -448,6 +449,16 @@ const handleApi = async (req, res, pathname) => {
 
   if (req.method === "GET" && pathname === "/api/state") {
     return sendJson(res, 200, getStatePayload());
+  }
+
+  if (req.method === "GET" && pathname === "/api/stats") {
+    const stats = collectStats({
+      workspace: WORKSPACE,
+      queueDir: QUEUE_DIR,
+      session: UI_SESSION,
+      maxOutputBytes: MAX_OUTPUT_BYTES,
+    });
+    return sendJson(res, 200, stats);
   }
 
   const chainDetailsMatch = pathname.match(/^\/api\/chains\/([^/]+)\/details$/);
