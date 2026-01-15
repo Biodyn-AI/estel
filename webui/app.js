@@ -21,6 +21,16 @@ const replInput = document.getElementById("replInput");
 const replSend = document.getElementById("replSend");
 const stopCurrent = document.getElementById("stopCurrent");
 const followAll = document.getElementById("followAll");
+const workspace = document.getElementById("workspace");
+const paneTree = document.getElementById("paneTree");
+const paneEditor = document.getElementById("paneEditor");
+const paneAgents = document.getElementById("paneAgents");
+const paneRepl = document.getElementById("paneRepl");
+const splitterTree = document.getElementById("splitterTree");
+const splitterEditor = document.getElementById("splitterEditor");
+const splitterHorizontal = document.getElementById("splitterHorizontal");
+const appRoot = document.querySelector(".app");
+const topbar = document.querySelector(".topbar");
 
 let currentMode = "manual";
 let selectedChainId = null;
@@ -33,6 +43,17 @@ let isDirty = false;
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
+const dragState = {
+  type: null,
+  startX: 0,
+  startY: 0,
+  left: 0,
+  middle: 0,
+  right: 0,
+  workspaceHeight: 0,
+  replHeight: 0,
+  availableHeight: 0,
+};
 
 const fetchJson = async (url, options = {}) => {
   const res = await fetch(url, options);
@@ -57,6 +78,18 @@ const putJson = async (url, payload) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+};
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const setWorkspaceColumns = (left, middle, right) => {
+  if (!workspace) return;
+  workspace.style.gridTemplateColumns = `${left}px 6px ${middle}px 6px ${right}px`;
+};
+
+const setWorkspaceRows = (workspaceHeight, replHeight) => {
+  if (!appRoot) return;
+  appRoot.style.gridTemplateRows = `auto ${workspaceHeight}px 6px ${replHeight}px`;
 };
 
 const setMode = (mode) => {
@@ -389,6 +422,104 @@ const loadTreeRoot = async () => {
   await refreshTreeState();
 };
 
+const initSplitters = () => {
+  if (!workspace || !paneTree || !paneEditor || !paneAgents) return;
+
+  const updateFromCurrent = () => {
+    const left = paneTree.getBoundingClientRect().width;
+    const middle = paneEditor.getBoundingClientRect().width;
+    const right = paneAgents.getBoundingClientRect().width;
+    setWorkspaceColumns(left, middle, right);
+  };
+
+  updateFromCurrent();
+
+  const startDrag = (type, event) => {
+    dragState.type = type;
+    dragState.startX = event.clientX;
+    dragState.startY = event.clientY;
+    dragState.left = paneTree.getBoundingClientRect().width;
+    dragState.middle = paneEditor.getBoundingClientRect().width;
+    dragState.right = paneAgents.getBoundingClientRect().width;
+    if (paneRepl && workspace && appRoot && topbar) {
+      dragState.workspaceHeight = workspace.getBoundingClientRect().height;
+      dragState.replHeight = paneRepl.getBoundingClientRect().height;
+      dragState.availableHeight =
+        appRoot.clientHeight -
+        topbar.getBoundingClientRect().height -
+        splitterHorizontal.offsetHeight;
+    }
+    document.body.classList.add("resizing");
+    if (type === "horizontal") {
+      document.body.classList.add("resizing-horizontal");
+    } else {
+      document.body.classList.add("resizing-vertical");
+    }
+  };
+
+  const stopDrag = () => {
+    dragState.type = null;
+    document.body.classList.remove("resizing");
+    document.body.classList.remove("resizing-horizontal");
+    document.body.classList.remove("resizing-vertical");
+  };
+
+  const onMove = (event) => {
+    if (!dragState.type) return;
+    if (dragState.type === "left") {
+      const dx = event.clientX - dragState.startX;
+      const minLeft = 180;
+      const minMiddle = 260;
+      const total = dragState.left + dragState.middle + dragState.right;
+      const newLeft = clamp(dragState.left + dx, minLeft, total - dragState.right - minMiddle);
+      const newMiddle = total - dragState.right - newLeft;
+      setWorkspaceColumns(newLeft, newMiddle, dragState.right);
+    } else if (dragState.type === "right") {
+      const dx = event.clientX - dragState.startX;
+      const minRight = 220;
+      const minMiddle = 260;
+      const total = dragState.left + dragState.middle + dragState.right;
+      const newRight = clamp(
+        dragState.right - dx,
+        minRight,
+        total - dragState.left - minMiddle
+      );
+      const newMiddle = total - dragState.left - newRight;
+      setWorkspaceColumns(dragState.left, newMiddle, newRight);
+    } else if (dragState.type === "horizontal") {
+      const dy = event.clientY - dragState.startY;
+      const minWorkspace = 240;
+      const minRepl = 160;
+      const available = dragState.availableHeight;
+      if (available <= 0) return;
+      const newWorkspace = clamp(
+        dragState.workspaceHeight + dy,
+        minWorkspace,
+        available - minRepl
+      );
+      const newRepl = available - newWorkspace;
+      setWorkspaceRows(newWorkspace, newRepl);
+    }
+  };
+
+  splitterTree?.addEventListener("mousedown", (event) => {
+    startDrag("left", event);
+  });
+
+  splitterEditor?.addEventListener("mousedown", (event) => {
+    startDrag("right", event);
+  });
+
+  splitterHorizontal?.addEventListener("mousedown", (event) => {
+    startDrag("horizontal", event);
+  });
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", stopDrag);
+  window.addEventListener("mouseleave", stopDrag);
+  window.addEventListener("resize", updateFromCurrent);
+};
+
 const refreshState = async () => {
   try {
     const data = await fetchJson("/api/state");
@@ -697,3 +828,4 @@ startStream();
 if (!window.EventSource) {
   poller = setInterval(refreshState, 2000);
 }
+initSplitters();

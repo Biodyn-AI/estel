@@ -39,11 +39,24 @@ body {
   overflow: hidden;
 }
 
+body.resizing,
+body.resizing * {
+  user-select: none;
+}
+
+body.resizing-vertical {
+  cursor: col-resize;
+}
+
+body.resizing-horizontal {
+  cursor: row-resize;
+}
+
 .app {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) 6px minmax(180px, 0.55fr);
   height: 100%;
-  gap: 12px;
+  gap: 0;
   padding: 16px;
 }
 
@@ -57,6 +70,7 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   animation: rise 520ms ease-out;
+  margin-bottom: 10px;
 }
 
 .brand {
@@ -122,8 +136,8 @@ body {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(420px, 2.6fr) minmax(280px, 1.2fr);
-  gap: 16px;
+  grid-template-columns: minmax(220px, 1fr) 6px minmax(420px, 2.6fr) 6px minmax(280px, 1.2fr);
+  gap: 0;
   align-items: stretch;
   min-height: 0;
 }
@@ -137,6 +151,22 @@ body {
   flex-direction: column;
   min-height: 0;
   animation: rise 520ms ease-out;
+}
+
+.splitter {
+  background: rgba(93, 108, 112, 0.15);
+}
+
+.splitter.vertical {
+  cursor: col-resize;
+  width: 6px;
+}
+
+.splitter.horizontal {
+  cursor: row-resize;
+  height: 6px;
+  border-radius: 999px;
+  margin: 0 8px;
 }
 
 .pane-header {
@@ -322,6 +352,7 @@ body {
   min-height: 0;
   flex: 1;
   overflow: auto;
+  font-size: 0.5rem;
 }
 
 .code textarea,
@@ -333,6 +364,7 @@ body {
   border: 1px solid #2a2f36;
   border-radius: var(--radius-sm);
   font-family: var(--mono);
+  font-size: inherit;
   padding: 12px;
   resize: vertical;
 }
@@ -560,10 +592,11 @@ body {
   margin: 0 16px 16px;
   padding: 16px;
   min-height: 0;
+  flex: 1;
+  font-size: 0.67rem;
 }
 
 .repl-line {
-  font-size: 13px;
   white-space: pre-wrap;
 }
 
@@ -617,6 +650,15 @@ body {
   .workspace {
     grid-template-columns: 1fr;
   }
+  .workspace > .pane {
+    margin-bottom: 12px;
+  }
+  .splitter.vertical {
+    display: none;
+  }
+  .splitter.horizontal {
+    display: none;
+  }
   .topbar {
     flex-direction: column;
     align-items: flex-start;
@@ -630,6 +672,7 @@ body {
   }
   .app {
     height: auto;
+    grid-template-rows: auto auto auto auto;
   }
 }
 

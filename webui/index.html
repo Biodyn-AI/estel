@@ -28,8 +28,8 @@
         </div>
       </header>
 
-      <main class="workspace">
-        <section class="pane tree">
+      <main class="workspace" id="workspace">
+        <section class="pane tree" id="paneTree">
           <div class="pane-header">
             <h2>Folder Structure</h2>
             <button class="ghost">/workspace</button>
@@ -44,7 +44,8 @@
           <div class="tree-body" id="treeBody"></div>
         </section>
 
-        <section class="pane editor">
+        <div class="splitter vertical" id="splitterTree" aria-hidden="true"></div>
+        <section class="pane editor" id="paneEditor">
           <div class="pane-header">
             <h2>File Preview</h2>
             <span class="pill">workspace</span>
@@ -64,7 +65,8 @@
           </div>
         </section>
 
-        <aside class="pane agents">
+        <div class="splitter vertical" id="splitterEditor" aria-hidden="true"></div>
+        <aside class="pane agents" id="paneAgents">
           <div class="pane-header">
             <h2>Agents</h2>
             <div class="active-chain">
@@ -104,7 +106,9 @@
         </aside>
       </main>
 
-      <section class="pane repl">
+      <div class="splitter horizontal" id="splitterHorizontal" aria-hidden="true"></div>
+
+      <section class="pane repl" id="paneRepl">
         <div class="pane-header">
           <h2>REPL</h2>
           <div class="repl-meta">
