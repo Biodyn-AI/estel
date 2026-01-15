@@ -4,6 +4,7 @@ const codePath = document.getElementById("codePath");
 const codeBadge = document.getElementById("codeBadge");
 const editToggle = document.getElementById("editToggle");
 const saveFile = document.getElementById("saveFile");
+const viewToggle = document.getElementById("viewToggle");
 const newFile = document.getElementById("newFile");
 const newFolder = document.getElementById("newFolder");
 const renamePath = document.getElementById("renamePath");
@@ -41,6 +42,12 @@ let selectedType = "";
 let currentFile = null;
 let editMode = false;
 let isDirty = false;
+let editorView = "file";
+let latestChains = [];
+let latestActiveChain = null;
+let chainDetails = null;
+let chainDetailsLoading = null;
+const chainDetailsCache = new Map();
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -98,9 +105,210 @@ const setMode = (mode) => {
   modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === mode));
 };
 
+const statusClassFor = (status) =>
+  ({
+    working: "live",
+    queued: "pending",
+    done: "done",
+    failed: "failed",
+  }[status || "queued"]);
+
+const formatTimestamp = (value) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+};
+
+const getPreferredChainId = () =>
+  selectedChainId || latestActiveChain || (latestChains[0] && latestChains[0].id);
+
+const getChainSummary = (chainId) =>
+  latestChains.find((chain) => chain.id === chainId) || null;
+
+const setEditorView = (view) => {
+  editorView = view;
+  if (viewToggle) {
+    viewToggle.textContent = view === "file" ? "Chains" : "File";
+  }
+  if (view === "chain") {
+    editMode = false;
+    isDirty = false;
+  }
+  updateEditorControls();
+  renderCode();
+  if (view === "chain") {
+    refreshChainDetails();
+  }
+};
+
+const refreshChainDetails = async () => {
+  if (editorView !== "chain") return;
+  const chainId = getPreferredChainId();
+  if (!chainId) {
+    chainDetails = null;
+    renderCode();
+    return;
+  }
+  const cached = chainDetailsCache.get(chainId);
+  if (cached && Date.now() - cached.fetchedAt < 1200) {
+    chainDetails = cached.data;
+    renderCode();
+    return;
+  }
+  if (chainDetailsLoading === chainId) return;
+  chainDetailsLoading = chainId;
+  try {
+    const data = await fetchJson(`/api/chains/${encodeURIComponent(chainId)}/details`);
+    chainDetails = data;
+    chainDetailsCache.set(chainId, { data, fetchedAt: Date.now() });
+  } catch (err) {
+    console.error(err);
+  } finally {
+    chainDetailsLoading = null;
+    renderCode();
+  }
+};
+
+const renderChainDetails = () => {
+  if (!codePane || !codePath) return;
+  const chainId = getPreferredChainId();
+  if (!chainId) {
+    codePath.textContent = "Chain details";
+    const empty = document.createElement("div");
+    empty.className = "code-empty";
+    empty.textContent = "No chains available yet.";
+    codePane.appendChild(empty);
+    return;
+  }
+
+  const summary = getChainSummary(chainId);
+  const title = summary?.title || chainDetails?.chain?.title || "Chain details";
+  const displayId = summary?.displayId || chainDetails?.chain?.displayId || chainId;
+  codePath.textContent = `${displayId} · ${title}`;
+
+  if (!chainDetails || chainDetails.id !== chainId) {
+    const loading = document.createElement("div");
+    loading.className = "code-empty";
+    loading.textContent = "Loading chain details...";
+    codePane.appendChild(loading);
+    return;
+  }
+
+  const detail = chainDetails;
+  const wrapper = document.createElement("div");
+  wrapper.className = "chain-detail";
+
+  const summaryCard = document.createElement("div");
+  summaryCard.className = "chain-summary";
+  const summaryTitle = document.createElement("h3");
+  summaryTitle.textContent = title;
+  summaryCard.appendChild(summaryTitle);
+
+  const metaLine = document.createElement("div");
+  metaLine.className = "chain-meta-line";
+  const idSpan = document.createElement("span");
+  idSpan.textContent = `id: ${displayId}`;
+  metaLine.appendChild(idSpan);
+  const modeSpan = document.createElement("span");
+  modeSpan.textContent = `mode: ${summary?.mode || detail.chain?.mode || "--"}`;
+  metaLine.appendChild(modeSpan);
+  const statusSpan = document.createElement("span");
+  statusSpan.textContent = `status: ${summary?.status || detail.chain?.status || "--"}`;
+  metaLine.appendChild(statusSpan);
+  summaryCard.appendChild(metaLine);
+
+  const statusLine = summary?.statusLine || detail.chain?.statusLine;
+  if (statusLine) {
+    const statusEl = document.createElement("div");
+    statusEl.className = "chain-status";
+    statusEl.textContent = statusLine;
+    summaryCard.appendChild(statusEl);
+  }
+
+  wrapper.appendChild(summaryCard);
+
+  const runs = detail.runs || [];
+  const runsWrap = document.createElement("div");
+  runsWrap.className = "chain-runs";
+
+  if (!runs.length) {
+    const empty = document.createElement("div");
+    empty.className = "chain-empty";
+    empty.textContent = "No runs yet for this chain.";
+    runsWrap.appendChild(empty);
+  } else {
+    runs.forEach((run) => {
+      const card = document.createElement("div");
+      card.className = "chain-run";
+
+      const header = document.createElement("div");
+      header.className = "run-header";
+
+      const runTitle = document.createElement("div");
+      runTitle.className = "run-title";
+      runTitle.textContent = run.id;
+
+      const meta = document.createElement("div");
+      meta.className = "run-meta";
+      const status = document.createElement("span");
+      status.className = `status ${statusClassFor(run.status)}`;
+      status.textContent = run.status || "done";
+      meta.appendChild(status);
+      const time = formatTimestamp(run.created);
+      if (time) {
+        const timeEl = document.createElement("span");
+        timeEl.textContent = time;
+        meta.appendChild(timeEl);
+      }
+
+      header.appendChild(runTitle);
+      header.appendChild(meta);
+      card.appendChild(header);
+
+      if (run.statusLine) {
+        const line = document.createElement("div");
+        line.className = "chain-status";
+        line.textContent = run.statusLine;
+        card.appendChild(line);
+      }
+
+      if (run.prompt) {
+        const prompt = document.createElement("div");
+        prompt.className = "run-prompt";
+        prompt.textContent = run.prompt;
+        card.appendChild(prompt);
+      }
+
+      if (run.output) {
+        const label = document.createElement("div");
+        label.className = "run-output-label";
+        label.textContent = "Output";
+        card.appendChild(label);
+        const output = document.createElement("pre");
+        output.className = "chain-output";
+        output.textContent = run.output + (run.outputTruncated ? "\n…truncated" : "");
+        card.appendChild(output);
+      } else {
+        const emptyOutput = document.createElement("div");
+        emptyOutput.className = "run-output-label";
+        emptyOutput.textContent = "No output yet.";
+        card.appendChild(emptyOutput);
+      }
+
+      runsWrap.appendChild(card);
+    });
+  }
+
+  wrapper.appendChild(runsWrap);
+  codePane.appendChild(wrapper);
+};
+
 const renderChains = (chains, activeId) => {
   if (!chainList) return;
   chainList.innerHTML = "";
+  latestChains = chains;
+  latestActiveChain = activeId;
 
   const runningCount = chains.filter((chain) => chain.status === "working").length;
   if (chainCount) {
@@ -121,12 +329,7 @@ const renderChains = (chains, activeId) => {
     item.dataset.chainId = chain.id;
     item.dataset.displayId = chain.displayId || "--";
 
-    const statusClass = {
-      working: "live",
-      queued: "pending",
-      done: "done",
-      failed: "failed",
-    }[chain.status || "queued"];
+    const statusClass = statusClassFor(chain.status);
 
     const scopeChip =
       chain.scope && chain.scope !== "workspace"
@@ -210,6 +413,13 @@ const updateMeta = (meta) => {
 
 const updateEditorControls = () => {
   if (!codeBadge || !editToggle || !saveFile) return;
+  if (editorView === "chain") {
+    codeBadge.textContent = "chain";
+    editToggle.disabled = true;
+    saveFile.disabled = true;
+    editToggle.textContent = "Edit";
+    return;
+  }
   if (!currentFile) {
     codeBadge.textContent = "idle";
     editToggle.disabled = true;
@@ -242,6 +452,12 @@ const updateEditorControls = () => {
 const renderCode = () => {
   if (!codePane || !codePath) return;
   codePane.innerHTML = "";
+  codePane.classList.toggle("chain-view", editorView === "chain");
+
+  if (editorView === "chain") {
+    renderChainDetails();
+    return;
+  }
 
   if (!currentFile) {
     const empty = document.createElement("div");
@@ -523,12 +739,19 @@ const initSplitters = () => {
   window.addEventListener("resize", updateFromCurrent);
 };
 
+const handleState = (data) => {
+  renderChains(data.chains || [], data.activeChain || null);
+  renderRepl(data.repl || []);
+  updateMeta(data.meta || {});
+  if (editorView === "chain") {
+    refreshChainDetails();
+  }
+};
+
 const refreshState = async () => {
   try {
     const data = await fetchJson("/api/state");
-    renderChains(data.chains || [], data.activeChain || null);
-    renderRepl(data.repl || []);
-    updateMeta(data.meta || {});
+    handleState(data);
   } catch (err) {
     console.error(err);
   }
@@ -542,9 +765,7 @@ const startStream = () => {
   stream.addEventListener("state", (event) => {
     try {
       const data = JSON.parse(event.data);
-      renderChains(data.chains || [], data.activeChain || null);
-      renderRepl(data.repl || []);
-      updateMeta(data.meta || {});
+      handleState(data);
     } catch (err) {
       console.error(err);
     }
@@ -610,6 +831,15 @@ if (chainList) {
     chainList.querySelectorAll(".chain-item").forEach((btn) => {
       btn.classList.toggle("active", btn === item);
     });
+    if (editorView === "chain") {
+      refreshChainDetails();
+    }
+  });
+}
+
+if (viewToggle) {
+  viewToggle.addEventListener("click", () => {
+    setEditorView(editorView === "file" ? "chain" : "file");
   });
 }
 
@@ -824,6 +1054,7 @@ if (followAll) {
 }
 
 setMode(currentMode);
+setEditorView(editorView);
 loadTreeRoot();
 refreshState();
 startStream();

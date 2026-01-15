@@ -12,6 +12,7 @@ const STATIC_DIR = path.join(WORKSPACE, "webui");
 const PORT = Number(process.env.UI_PORT || process.env.PORT || 5177);
 const TREE_SKIP = new Set([".git", "node_modules"]);
 const MAX_FILE_BYTES = 200 * 1024;
+const MAX_OUTPUT_BYTES = 120 * 1024;
 const clients = new Set();
 
 const STATUS_DIRS = {
@@ -191,6 +192,73 @@ const taskFromRun = (id, status, fallbackMtime) => {
     status,
     updatedAt: parseTimestamp(data.created) || stat.mtimeMs,
   };
+};
+
+const readTailFile = (filePath, maxBytes) => {
+  if (!fs.existsSync(filePath)) return { text: "", truncated: false };
+  const stat = fs.statSync(filePath);
+  if (!stat.size) return { text: "", truncated: false };
+  const readSize = Math.min(stat.size, maxBytes);
+  const fd = fs.openSync(filePath, "r");
+  const buffer = Buffer.alloc(readSize);
+  fs.readSync(fd, buffer, 0, readSize, stat.size - readSize);
+  fs.closeSync(fd);
+  const text = buffer.toString("utf8");
+  return { text, truncated: stat.size > readSize };
+};
+
+const loadRunOutput = (runId) => {
+  const runDir = path.join(QUEUE_DIR, "runs", runId);
+  const outputPath = path.join(runDir, "output.txt");
+  const outboxPath = path.join(QUEUE_DIR, "outbox", `${runId}.md`);
+  const target = fs.existsSync(outputPath) ? outputPath : outboxPath;
+  return readTailFile(target, MAX_OUTPUT_BYTES);
+};
+
+const loadRunPrompt = (runId, task) => {
+  if (task?.prompt) return task.prompt;
+  if (task?.goal) return task.goal;
+  if (task?.task) return task.task;
+  const promptPath = path.join(QUEUE_DIR, "runs", runId, "prompt.txt");
+  if (!fs.existsSync(promptPath)) return "";
+  return fs.readFileSync(promptPath, "utf8").trim();
+};
+
+const loadRunStatus = (runId) => {
+  if (fs.existsSync(path.join(QUEUE_DIR, "working", `${runId}.json`))) return "working";
+  if (fs.existsSync(path.join(QUEUE_DIR, "inbox", `${runId}.json`))) return "queued";
+  if (fs.existsSync(path.join(QUEUE_DIR, "failed", `${runId}.md`))) return "failed";
+  if (fs.existsSync(path.join(QUEUE_DIR, "outbox", `${runId}.md`))) return "done";
+  return "done";
+};
+
+const loadChainRuns = (chainKey) => {
+  const isManual = chainKey.startsWith("manual:");
+  const chainId = isManual ? chainKey.slice("manual:".length) : chainKey;
+  const runsDir = path.join(QUEUE_DIR, "runs");
+  const runs = [];
+  safeReadDir(runsDir).forEach((runId) => {
+    const taskPath = path.join(runsDir, runId, "task.json");
+    const task = readJson(taskPath);
+    if (!task) return;
+    const matches = isManual
+      ? !task.chain && task.id === chainId
+      : task.chain === chainId || (!task.chain && task.id === chainId);
+    if (!matches) return;
+    const output = loadRunOutput(runId);
+    runs.push({
+      id: runId,
+      created: task.created || "",
+      status: loadRunStatus(runId),
+      statusLine: readStatusLine(runId),
+      prompt: loadRunPrompt(runId, task),
+      output: output.text,
+      outputTruncated: output.truncated,
+    });
+  });
+
+  runs.sort((a, b) => parseTimestamp(b.created) - parseTimestamp(a.created));
+  return runs;
 };
 
 const loadTasks = () => {
@@ -380,6 +448,24 @@ const handleApi = async (req, res, pathname) => {
 
   if (req.method === "GET" && pathname === "/api/state") {
     return sendJson(res, 200, getStatePayload());
+  }
+
+  const chainDetailsMatch = pathname.match(/^\/api\/chains\/([^/]+)\/details$/);
+  if (req.method === "GET" && chainDetailsMatch) {
+    const rawId = decodeURIComponent(chainDetailsMatch[1]);
+    const tasks = loadTasks();
+    const chains = buildChains(tasks);
+    const chain =
+      chains.find((entry) => entry.id === rawId) ||
+      chains.find((entry) => entry.chainId === rawId) ||
+      null;
+    const runs = loadChainRuns(rawId);
+    return sendJson(res, 200, {
+      id: rawId,
+      chainId: chain?.chainId || rawId,
+      chain,
+      runs,
+    });
   }
 
   if (req.method === "GET" && pathname === "/api/tree") {
