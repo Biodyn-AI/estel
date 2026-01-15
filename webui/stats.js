@@ -127,10 +127,14 @@ const collectStats = (options = {}) => {
     const status = runStatus(queueDir, runId);
     runStatusCounts[status] = (runStatusCounts[status] || 0) + 1;
 
-    const chainKey = task.chain ? task.chain : `manual:${task.id || runId}`;
-    const chainId = task.chain || task.id || runId;
+    const manualChain = task.manual_chain || task.manualChain || "";
+    const isAuto = task.chain || task.mode === "autonomous";
+    const chainRef = task.chain || task.id || runId;
+    const manualRef = manualChain || task.id || runId;
+    const chainKey = isAuto ? chainRef : `manual:${manualRef}`;
+    const chainId = isAuto ? chainRef : manualRef;
     const title = task.goal || task.prompt || task.task || "untitled chain";
-    const mode = task.chain || task.mode === "autonomous" ? "auto" : "manual";
+    const mode = isAuto ? "auto" : "manual";
     const createdAt = parseTimestamp(task.created);
     const finishedAt = runFinishedAt(queueDir, runId, status);
     const durationMs = createdAt ? (finishedAt || now) - createdAt : null;

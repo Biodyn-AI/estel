@@ -239,6 +239,12 @@ resolve_chain_id() {
       echo "$chain"
       return 0
     fi
+    local manual_chain
+    manual_chain="$(jq -r '.manual_chain // empty' "$task_json" 2>/dev/null || true)"
+    if [ -n "$manual_chain" ]; then
+      echo "$manual_chain"
+      return 0
+    fi
   fi
   echo "$input"
 }
@@ -350,6 +356,23 @@ run_id_active() {
   return 1
 }
 
+manual_chain_active_id() {
+  local chain_id="$1"
+  if [ -z "$chain_id" ]; then
+    return 1
+  fi
+  shopt -s nullglob
+  local f
+  for f in "$INBOX_DIR"/*.json "$WORKING_DIR"/*.json; do
+    local manual_chain
+    manual_chain="$(jq -r '.manual_chain // empty' "$f" 2>/dev/null || true)"
+    if [ "$manual_chain" = "$chain_id" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 manual_chain_active() {
   local session="$1"
   shopt -s nullglob
@@ -445,17 +468,31 @@ queue_manual_task() {
   local prompt="$1"
   local session="$2"
   local verbose="${3:-0}"
+  local manual_chain="${4:-}"
   local id
   id="$(new_id)"
-  jq -n \
-    --arg id "$id" \
-    --arg mode "manual" \
-    --arg prompt "$prompt" \
-    --arg session "$session" \
-    --arg created "$(now_utc)" \
-    --argjson verbose "$verbose" \
-    '{id:$id,mode:$mode,prompt:$prompt,session:$session,verbose:$verbose,created:$created}' \
-    > "$INBOX_DIR/$id.json"
+  if [ -n "$manual_chain" ]; then
+    jq -n \
+      --arg id "$id" \
+      --arg mode "manual" \
+      --arg prompt "$prompt" \
+      --arg session "$session" \
+      --arg manual_chain "$manual_chain" \
+      --arg created "$(now_utc)" \
+      --argjson verbose "$verbose" \
+      '{id:$id,mode:$mode,prompt:$prompt,session:$session,manual_chain:$manual_chain,verbose:$verbose,created:$created}' \
+      > "$INBOX_DIR/$id.json"
+  else
+    jq -n \
+      --arg id "$id" \
+      --arg mode "manual" \
+      --arg prompt "$prompt" \
+      --arg session "$session" \
+      --arg created "$(now_utc)" \
+      --argjson verbose "$verbose" \
+      '{id:$id,mode:$mode,prompt:$prompt,session:$session,verbose:$verbose,created:$created}' \
+      > "$INBOX_DIR/$id.json"
+  fi
   echo "$id"
 }
 
@@ -507,12 +544,12 @@ reactivate_chain_if_needed() {
   if [ -z "$session" ] && [ -n "${AGENT_SESSION:-}" ]; then
     session="$AGENT_SESSION"
   fi
-  if run_id_active "$chain_id"; then
+  if run_id_active "$chain_id" || manual_chain_active_id "$chain_id"; then
     return 0
   fi
   rm -f "$(chain_stop_file "$chain_id")"
   local new_id
-  new_id="$(queue_manual_task "$note" "$session" 0)"
+  new_id="$(queue_manual_task "$note" "$session" 0 "$chain_id")"
   echo "manual chain reactivated ($new_id)"
 }
 

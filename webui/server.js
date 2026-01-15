@@ -242,8 +242,9 @@ const loadChainRuns = (chainKey) => {
     const taskPath = path.join(runsDir, runId, "task.json");
     const task = readJson(taskPath);
     if (!task) return;
+    const manualChain = task.manual_chain || task.manualChain || "";
     const matches = isManual
-      ? !task.chain && task.id === chainId
+      ? manualChain === chainId || (!task.chain && task.id === chainId)
       : task.chain === chainId || (!task.chain && task.id === chainId);
     if (!matches) return;
     const output = loadRunOutput(runId);
@@ -297,10 +298,13 @@ const buildChains = (tasks) => {
   const chainMap = new Map();
 
   tasks.forEach((task) => {
+    const manualChain = task.manual_chain || task.manualChain || "";
     const isAuto = task.chain || task.mode === "autonomous";
     const mode = isAuto ? "auto" : "manual";
-    const chainKey = task.chain || `manual:${task.id}`;
-    const chainId = task.chain || task.id;
+    const chainRef = task.chain || task.id;
+    const manualRef = manualChain || task.id;
+    const chainKey = isAuto ? chainRef : `manual:${manualRef}`;
+    const chainId = isAuto ? chainRef : manualRef;
     const title =
       task.goal || task.prompt || task.task || "untitled chain";
     const entry = chainMap.get(chainKey) || {
