@@ -19,7 +19,6 @@
           <span class="brand-mark">A</span>
           <div class="brand-text">
             <span class="brand-title">AutoAgents Studio</span>
-            <span class="brand-subtitle">codex daemon workspace</span>
           </div>
         </div>
         <div class="topbar-meta">
@@ -30,9 +29,7 @@
 
       <main class="workspace" id="workspace">
         <section class="pane tree" id="paneTree">
-          <div class="pane-header">
-            <span class="ghost">/workspace</span>
-          </div>
+          <div class="pane-header"></div>
           <div class="tree-actions">
             <button id="newFile" class="ghost" type="button">New file</button>
             <button id="newFolder" class="ghost" type="button">New folder</button>
@@ -45,9 +42,7 @@
 
         <div class="splitter vertical" id="splitterTree" aria-hidden="true"></div>
         <section class="pane editor" id="paneEditor">
-          <div class="pane-header">
-            <span class="pill">workspace</span>
-          </div>
+          <div class="pane-header"></div>
           <div class="editor-body">
             <div class="code-header">
               <span id="codePath">Select a file to preview</span>
@@ -65,11 +60,7 @@
 
         <div class="splitter vertical" id="splitterEditor" aria-hidden="true"></div>
         <aside class="pane agents" id="paneAgents">
-          <div class="pane-header">
-            <div class="active-chain">
-              active chain: <span id="activeChain">--</span>
-            </div>
-          </div>
+          <div class="pane-header"></div>
           <div class="agents-body">
             <div class="create-chain">
               <label for="chainPrompt">Create chain</label>
@@ -106,12 +97,7 @@
       <div class="splitter horizontal" id="splitterHorizontal" aria-hidden="true"></div>
 
       <section class="pane repl" id="paneRepl">
-        <div class="pane-header">
-          <div class="repl-meta">
-            <span class="pill alt">follow all</span>
-            <span class="pill">queue: 2</span>
-          </div>
-        </div>
+        <div class="pane-header"></div>
         <div class="repl-status" id="replStatus">thinking: idle</div>
         <div class="repl-body" id="replBody"></div>
         <form class="repl-input">

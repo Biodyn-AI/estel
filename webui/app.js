@@ -10,7 +10,6 @@ const renamePath = document.getElementById("renamePath");
 const deletePath = document.getElementById("deletePath");
 const refreshTree = document.getElementById("refreshTree");
 const chainList = document.getElementById("chainList");
-const activeChain = document.getElementById("activeChain");
 const chainCount = document.getElementById("chainCount");
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"));
 const createButton = document.getElementById("createChain");
@@ -113,11 +112,9 @@ const renderChains = (chains, activeId) => {
     empty.className = "chain-item";
     empty.textContent = "No chains yet. Create one to get started.";
     chainList.appendChild(empty);
-    if (activeChain) activeChain.textContent = "--";
     return;
   }
 
-  let activeDisplay = "--";
   chains.forEach((chain) => {
     const item = document.createElement("button");
     item.className = "chain-item";
@@ -131,6 +128,11 @@ const renderChains = (chains, activeId) => {
       failed: "failed",
     }[chain.status || "queued"];
 
+    const scopeChip =
+      chain.scope && chain.scope !== "workspace"
+        ? `<span class="chip">${chain.scope}</span>`
+        : "";
+
     item.innerHTML = `
       <div class="chain-top">
         <span class="chain-id">${chain.displayId || "--"}</span>
@@ -140,7 +142,7 @@ const renderChains = (chains, activeId) => {
       ${chain.statusLine ? `<div class="chain-status">${chain.statusLine}</div>` : ""}
       <div class="chain-meta">
         <span class="chip">${chain.mode}</span>
-        <span class="chip">${chain.scope || "workspace"}</span>
+        ${scopeChip}
       </div>
     `;
 
@@ -149,7 +151,6 @@ const renderChains = (chains, activeId) => {
       (!selectedChainId && activeId && activeId === chain.id);
     if (shouldActivate) {
       item.classList.add("active");
-      activeDisplay = chain.displayId || "--";
       selectedChainId = chain.id;
     }
 
@@ -158,12 +159,7 @@ const renderChains = (chains, activeId) => {
 
   if (!selectedChainId && chains[0]) {
     selectedChainId = chains[0].id;
-    activeDisplay = chains[0].displayId || "--";
     chainList.firstChild.classList.add("active");
-  }
-
-  if (activeChain) {
-    activeChain.textContent = activeDisplay;
   }
 
   updateReplStatus(chains, activeId);
@@ -257,7 +253,7 @@ const renderCode = () => {
     return;
   }
 
-  codePath.textContent = `/workspace/${currentFile.path}`;
+  codePath.textContent = currentFile.path || "Select a file";
 
   if (editMode) {
     const textarea = document.createElement("textarea");
@@ -311,11 +307,6 @@ const renderCode = () => {
 const renderTree = () => {
   if (!treeBody) return;
   treeBody.innerHTML = "";
-
-  const rootLabel = document.createElement("div");
-  rootLabel.className = "tree-root";
-  rootLabel.textContent = "/workspace";
-  treeBody.appendChild(rootLabel);
 
   const container = document.createElement("div");
   container.className = "tree-children";
@@ -619,9 +610,6 @@ if (chainList) {
     chainList.querySelectorAll(".chain-item").forEach((btn) => {
       btn.classList.toggle("active", btn === item);
     });
-    if (activeChain) {
-      activeChain.textContent = item.dataset.displayId || "--";
-    }
   });
 }
 

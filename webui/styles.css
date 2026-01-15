@@ -178,6 +178,13 @@ body.resizing-horizontal {
   background: linear-gradient(180deg, #fffdf8 0%, var(--panel) 100%);
 }
 
+.pane-header:empty {
+  display: none;
+  padding: 0;
+  border-bottom: none;
+  background: none;
+}
+
 .pane-header h2 {
   margin: 0;
   font-family: var(--serif);
