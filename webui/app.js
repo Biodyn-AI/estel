@@ -16,6 +16,7 @@ const modeButtons = Array.from(document.querySelectorAll(".mode-button"));
 const createButton = document.getElementById("createChain");
 const chainPrompt = document.getElementById("chainPrompt");
 const replBody = document.getElementById("replBody");
+const replStatus = document.getElementById("replStatus");
 const replInput = document.getElementById("replInput");
 const replSend = document.getElementById("replSend");
 const stopCurrent = document.getElementById("stopCurrent");
@@ -129,6 +130,22 @@ const renderChains = (chains, activeId) => {
   if (activeChain) {
     activeChain.textContent = activeDisplay;
   }
+
+  updateReplStatus(chains, activeId);
+};
+
+const updateReplStatus = (chains, activeId) => {
+  if (!replStatus) return;
+  let status = "";
+  if (activeId) {
+    const active = chains.find((chain) => chain.id === activeId);
+    status = active?.statusLine || "";
+  }
+  if (!status) {
+    const working = chains.find((chain) => chain.status === "working" && chain.statusLine);
+    status = working?.statusLine || "";
+  }
+  replStatus.textContent = status ? `thinking: ${status}` : "thinking: idle";
 };
 
 const renderRepl = (lines) => {
