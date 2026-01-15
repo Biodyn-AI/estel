@@ -2,6 +2,13 @@ const treeBody = document.getElementById("treeBody");
 const codePane = document.getElementById("codePane");
 const codePath = document.getElementById("codePath");
 const codeBadge = document.getElementById("codeBadge");
+const editToggle = document.getElementById("editToggle");
+const saveFile = document.getElementById("saveFile");
+const newFile = document.getElementById("newFile");
+const newFolder = document.getElementById("newFolder");
+const renamePath = document.getElementById("renamePath");
+const deletePath = document.getElementById("deletePath");
+const refreshTree = document.getElementById("refreshTree");
 const chainList = document.getElementById("chainList");
 const activeChain = document.getElementById("activeChain");
 const chainCount = document.getElementById("chainCount");
@@ -17,6 +24,11 @@ const followAll = document.getElementById("followAll");
 let currentMode = "manual";
 let selectedChainId = null;
 let activeFilePath = "";
+let selectedPath = "";
+let selectedType = "";
+let currentFile = null;
+let editMode = false;
+let isDirty = false;
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -129,28 +141,83 @@ const renderRepl = (lines) => {
   replBody.scrollTop = replBody.scrollHeight;
 };
 
-const renderCode = (content, filePath, truncated) => {
-  if (!codePane || !codePath || !codeBadge) return;
-  codePath.textContent = filePath ? `/workspace/${filePath}` : "Select a file";
-  codeBadge.textContent = truncated ? "truncated" : "preview";
+const updateEditorControls = () => {
+  if (!codeBadge || !editToggle || !saveFile) return;
+  if (!currentFile) {
+    codeBadge.textContent = "idle";
+    editToggle.disabled = true;
+    saveFile.disabled = true;
+    editToggle.textContent = "Edit";
+    return;
+  }
 
+  if (currentFile.truncated) {
+    codeBadge.textContent = "truncated";
+    editToggle.disabled = true;
+    saveFile.disabled = true;
+    editToggle.textContent = "Edit";
+    return;
+  }
+
+  if (editMode) {
+    codeBadge.textContent = isDirty ? "unsaved" : "editing";
+    editToggle.textContent = "Preview";
+    editToggle.disabled = false;
+    saveFile.disabled = !isDirty;
+  } else {
+    codeBadge.textContent = "preview";
+    editToggle.textContent = "Edit";
+    editToggle.disabled = false;
+    saveFile.disabled = true;
+  }
+};
+
+const renderCode = () => {
+  if (!codePane || !codePath) return;
   codePane.innerHTML = "";
-  if (!content) {
+
+  if (!currentFile) {
+    const empty = document.createElement("div");
+    empty.className = "code-empty";
+    empty.textContent = "Pick a file from the tree to view it here.";
+    codePane.appendChild(empty);
+    codePath.textContent = "Select a file";
+    updateEditorControls();
+    return;
+  }
+
+  codePath.textContent = `/workspace/${currentFile.path}`;
+
+  if (editMode) {
+    const textarea = document.createElement("textarea");
+    textarea.className = "code-textarea";
+    textarea.value = currentFile.content || "";
+    textarea.addEventListener("input", () => {
+      isDirty = true;
+      updateEditorControls();
+    });
+    codePane.appendChild(textarea);
+    updateEditorControls();
+    return;
+  }
+
+  if (!currentFile.content) {
     const empty = document.createElement("div");
     empty.className = "code-empty";
     empty.textContent = "File is empty.";
     codePane.appendChild(empty);
+    updateEditorControls();
     return;
   }
 
-  if (truncated) {
+  if (currentFile.truncated) {
     const notice = document.createElement("div");
     notice.className = "code-empty";
     notice.textContent = "Showing first 200KB of file.";
     codePane.appendChild(notice);
   }
 
-  const lines = content.split(/\r?\n/);
+  const lines = currentFile.content.split(/\r?\n/);
   const wrapper = document.createElement("div");
   wrapper.className = "code-lines";
   lines.forEach((line, idx) => {
@@ -167,6 +234,7 @@ const renderCode = (content, filePath, truncated) => {
     wrapper.appendChild(lineEl);
   });
   codePane.appendChild(wrapper);
+  updateEditorControls();
 };
 
 const renderTree = () => {
@@ -192,13 +260,13 @@ const appendTreeNode = (entry, container) => {
   button.className = `tree-item ${entry.type}`;
   button.dataset.path = entry.path;
   button.dataset.type = entry.type;
-  if (entry.type === "file" && entry.path === activeFilePath) {
+  if (entry.path === selectedPath) {
     button.classList.add("active");
   }
 
   const icon = document.createElement("span");
   icon.className = "tree-icon";
-  icon.textContent = entry.type === "folder" ? "▸" : "•";
+  icon.textContent = entry.type === "folder" ? ">" : "*";
   button.appendChild(icon);
 
   const label = document.createElement("span");
@@ -209,7 +277,7 @@ const appendTreeNode = (entry, container) => {
   if (entry.type === "folder") {
     const isOpen = openFolders.has(entry.path);
     if (isOpen) {
-      icon.textContent = "▾";
+      icon.textContent = "v";
       const childContainer = document.createElement("div");
       childContainer.className = "tree-children";
       const children = treeCache.get(entry.path) || entry.entries || [];
@@ -226,6 +294,8 @@ const appendTreeNode = (entry, container) => {
   }
 
   button.addEventListener("click", async () => {
+    selectedPath = entry.path;
+    selectedType = entry.type;
     if (entry.type === "folder") {
       if (openFolders.has(entry.path)) {
         openFolders.delete(entry.path);
@@ -250,7 +320,14 @@ const appendTreeNode = (entry, container) => {
     activeFilePath = entry.path;
     try {
       const data = await fetchJson(`/api/file?path=${encodeURIComponent(entry.path)}`);
-      renderCode(data.content, data.path, data.truncated);
+      currentFile = {
+        path: data.path,
+        content: data.content || "",
+        truncated: data.truncated,
+      };
+      editMode = false;
+      isDirty = false;
+      renderCode();
       renderTree();
     } catch (err) {
       console.error(err);
@@ -260,14 +337,30 @@ const appendTreeNode = (entry, container) => {
   container.appendChild(node);
 };
 
-const loadTreeRoot = async () => {
+const refreshTreeState = async () => {
   try {
+    treeCache.clear();
     const data = await fetchJson("/api/tree?depth=2");
     treeCache.set("", data.entries || []);
+    const folders = Array.from(openFolders).filter((path) => path);
+    for (const folder of folders) {
+      try {
+        const child = await fetchJson(
+          `/api/tree?path=${encodeURIComponent(folder)}&depth=2`
+        );
+        treeCache.set(folder, child.entries || []);
+      } catch (err) {
+        console.error(err);
+      }
+    }
     renderTree();
   } catch (err) {
     console.error(err);
   }
+};
+
+const loadTreeRoot = async () => {
+  await refreshTreeState();
 };
 
 const refreshState = async () => {
@@ -326,6 +419,19 @@ const sendReplInput = async (input) => {
   }
 
   await postJson("/api/repl", { input: trimmed });
+};
+
+const getParentPath = (path) => {
+  if (!path) return "";
+  const parts = path.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+};
+
+const resolveTargetFolder = () => {
+  if (!selectedPath) return "";
+  if (selectedType === "folder") return selectedPath;
+  return getParentPath(selectedPath);
 };
 
 modeButtons.forEach((button) => {
@@ -390,6 +496,138 @@ if (stopCurrent) {
     } catch (err) {
       console.error(err);
     }
+  });
+}
+
+if (editToggle) {
+  editToggle.addEventListener("click", () => {
+    if (!currentFile || currentFile.truncated) return;
+    editMode = !editMode;
+    if (!editMode) {
+      isDirty = false;
+    }
+    renderCode();
+  });
+}
+
+if (saveFile) {
+  saveFile.addEventListener("click", async () => {
+    if (!currentFile || !editMode) return;
+    const textarea = codePane?.querySelector("textarea");
+    if (!textarea) return;
+    try {
+      await postJson("/api/file", {
+        path: currentFile.path,
+        content: textarea.value,
+      });
+      currentFile.content = textarea.value;
+      editMode = false;
+      isDirty = false;
+      renderCode();
+      await refreshTreeState();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (newFile) {
+  newFile.addEventListener("click", async () => {
+    const base = resolveTargetFolder();
+    const name = window.prompt("New file name:");
+    if (!name) return;
+    const target = base ? `${base}/${name}` : name;
+    try {
+      await postJson("/api/fs/create-file", { path: target, content: "" });
+      selectedPath = target;
+      selectedType = "file";
+      activeFilePath = target;
+      const data = await fetchJson(`/api/file?path=${encodeURIComponent(target)}`);
+      currentFile = { path: data.path, content: data.content || "", truncated: data.truncated };
+      editMode = true;
+      isDirty = false;
+      await refreshTreeState();
+      renderCode();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (newFolder) {
+  newFolder.addEventListener("click", async () => {
+    const base = resolveTargetFolder();
+    const name = window.prompt("New folder name:");
+    if (!name) return;
+    const target = base ? `${base}/${name}` : name;
+    try {
+      await postJson("/api/fs/create-folder", { path: target });
+      selectedPath = target;
+      selectedType = "folder";
+      openFolders.add(target);
+      await refreshTreeState();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (renamePath) {
+  renamePath.addEventListener("click", async () => {
+    if (!selectedPath) return;
+    const fromPath = selectedPath;
+    const parent = getParentPath(selectedPath);
+    const currentName = selectedPath.split("/").pop() || selectedPath;
+    const nextName = window.prompt("Rename to:", currentName);
+    if (!nextName || nextName === currentName) return;
+    const target = parent ? `${parent}/${nextName}` : nextName;
+    try {
+      await postJson("/api/fs/rename", { from: fromPath, to: target });
+      selectedPath = target;
+      selectedType = selectedType || "file";
+      if (activeFilePath === fromPath) {
+        activeFilePath = target;
+      }
+      await refreshTreeState();
+      if (selectedType === "file") {
+        const data = await fetchJson(`/api/file?path=${encodeURIComponent(target)}`);
+        currentFile = { path: data.path, content: data.content || "", truncated: data.truncated };
+        editMode = false;
+        isDirty = false;
+        renderCode();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (deletePath) {
+  deletePath.addEventListener("click", async () => {
+    if (!selectedPath) return;
+    const ok = window.confirm(`Delete ${selectedPath}?`);
+    if (!ok) return;
+    try {
+      await postJson("/api/fs/delete", { path: selectedPath });
+      if (activeFilePath === selectedPath) {
+        activeFilePath = "";
+        currentFile = null;
+        editMode = false;
+        isDirty = false;
+        renderCode();
+      }
+      selectedPath = "";
+      selectedType = "";
+      await refreshTreeState();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (refreshTree) {
+  refreshTree.addEventListener("click", async () => {
+    await refreshTreeState();
   });
 }
 

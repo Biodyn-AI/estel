@@ -447,6 +447,109 @@ const handleApi = async (req, res, pathname) => {
     return sendJson(res, 200, { status: "ok" });
   }
 
+  if (req.method === "PUT" && pathname === "/api/file") {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.path) {
+      return sendJson(res, 400, { error: "path required" });
+    }
+    const { resolved, relative } = resolveWorkspacePath(payload.path);
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      return sendJson(res, 400, { error: "path is a directory" });
+    }
+    fs.writeFileSync(resolved, payload.content || "", "utf8");
+    return sendJson(res, 200, { path: relative });
+  }
+
+  if (req.method === "POST" && pathname === "/api/fs/create-file") {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.path) {
+      return sendJson(res, 400, { error: "path required" });
+    }
+    const { resolved, relative } = resolveWorkspacePath(payload.path);
+    if (fs.existsSync(resolved)) {
+      return sendJson(res, 409, { error: "path already exists" });
+    }
+    const parent = path.dirname(resolved);
+    if (!fs.existsSync(parent)) {
+      return sendJson(res, 400, { error: "parent directory does not exist" });
+    }
+    fs.writeFileSync(resolved, payload.content || "", "utf8");
+    return sendJson(res, 200, { path: relative });
+  }
+
+  if (req.method === "POST" && pathname === "/api/fs/create-folder") {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.path) {
+      return sendJson(res, 400, { error: "path required" });
+    }
+    const { resolved, relative } = resolveWorkspacePath(payload.path);
+    if (fs.existsSync(resolved)) {
+      return sendJson(res, 409, { error: "path already exists" });
+    }
+    fs.mkdirSync(resolved, { recursive: true });
+    return sendJson(res, 200, { path: relative });
+  }
+
+  if (req.method === "POST" && pathname === "/api/fs/rename") {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.from || !payload.to) {
+      return sendJson(res, 400, { error: "from and to required" });
+    }
+    const from = resolveWorkspacePath(payload.from);
+    const to = resolveWorkspacePath(payload.to);
+    if (!fs.existsSync(from.resolved)) {
+      return sendJson(res, 404, { error: "source not found" });
+    }
+    fs.renameSync(from.resolved, to.resolved);
+    return sendJson(res, 200, { from: from.relative, to: to.relative });
+  }
+
+  if (req.method === "POST" && pathname === "/api/fs/delete") {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.path) {
+      return sendJson(res, 400, { error: "path required" });
+    }
+    const { resolved, relative } = resolveWorkspacePath(payload.path);
+    if (resolved === WORKSPACE) {
+      return sendJson(res, 400, { error: "refusing to delete workspace root" });
+    }
+    if (!fs.existsSync(resolved)) {
+      return sendJson(res, 404, { error: "path not found" });
+    }
+    fs.rmSync(resolved, { recursive: true, force: true });
+    return sendJson(res, 200, { path: relative });
+  }
+
   const chainStopMatch = pathname.match(/^\/api\/chains\/([^/]+)\/stop$/);
   if (req.method === "POST" && chainStopMatch) {
     const id = chainStopMatch[1];
