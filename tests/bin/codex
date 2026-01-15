@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+out_file=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [ "${args[$i]}" = "--output-last-message" ]; then
+    out_file="${args[$((i+1))]}"
+  fi
+done
+
+prompt=""
+if [ -t 0 ]; then
+  prompt="${args[-1]:-}"
+else
+  prompt="$(cat)"
+fi
+
+output=""
+if printf '%s' "$prompt" | grep -q "You are continuing an autonomous chain. The previous step did not provide a next task"; then
+  output="BEGIN_NEXT_TASK
+FALLBACK_TASK
+END_NEXT_TASK"
+elif printf '%s' "$prompt" | grep -q "You are running in an autonomous loop"; then
+  if printf '%s' "$prompt" | grep -q "MISSING_NEXT"; then
+    output="BEGIN_RESULT
+MISSING_NEXT_RESULT
+END_RESULT"
+  elif printf '%s' "$prompt" | grep -q "Decide the next concrete step toward the goal"; then
+    output="BEGIN_RESULT
+INIT_STEP
+END_RESULT
+BEGIN_NEXT_TASK
+TASK_A
+END_NEXT_TASK"
+  elif printf '%s' "$prompt" | grep -q "TASK_A"; then
+    output="DONE"
+  elif printf '%s' "$prompt" | grep -q "FALLBACK_TASK"; then
+    output="DONE"
+  else
+    output="DONE"
+  fi
+elif printf '%s' "$prompt" | grep -q "You are continuing a multi-turn conversation"; then
+  output="MANUAL_REPLY"
+else
+  output="OK"
+fi
+
+if [ -n "$out_file" ]; then
+  printf '%s\n' "$output" > "$out_file"
+else
+  printf '%s\n' "$output"
+fi

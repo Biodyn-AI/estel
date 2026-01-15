@@ -1,0 +1,28 @@
+services:
+  agent:
+    build:
+      context: .
+      args:
+        USERNAME: agent
+        USER_UID: 1000
+        USER_GID: 1000
+    container_name: agents-dev
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - codex_home:/home/agent/.codex
+    environment:
+      LOCAL_UID: "${LOCAL_UID:-1000}"
+      LOCAL_GID: "${LOCAL_GID:-1000}"
+      AGENT_WORKERS: "${AGENT_WORKERS:-1}"
+      POLL_SECONDS: "${POLL_SECONDS:-2}"
+      CODEX_FLAGS: "${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C /workspace}"
+      CODEX_EXEC_FLAGS: "${CODEX_EXEC_FLAGS:---skip-git-repo-check}"
+      CODEX_EXEC_MODE: "${CODEX_EXEC_MODE:-stdin}"
+      AGENT_VERBOSE: "${AGENT_VERBOSE:-0}"
+      SESSION_CONTEXT_LIMIT: "${SESSION_CONTEXT_LIMIT:-8000}"
+    tty: true
+    stdin_open: true
+    command: ["agentd"]
+volumes:
+  codex_home:

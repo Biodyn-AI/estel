@@ -1,0 +1,9 @@
+# Runtime state
+logs/
+queue/
+tasks/
+
+# Editor/system
+.idea/
+.DS_Store
+._*

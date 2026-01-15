@@ -1,0 +1,425 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SESSION_DIR="${AGENT_SESSION_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codex-agent}"
+SESSION_FILE="${SESSION_DIR}/session"
+HOST_UID="${LOCAL_UID:-$(id -u)}"
+HOST_GID="${LOCAL_GID:-$(id -g)}"
+VERBOSE=0
+LAST_CHAIN_ID=""
+FOLLOW_ALL_DEFAULT="${AGENT_FOLLOW_ALL:-1}"
+FOLLOW_ALL_PID=""
+FOLLOW_ALL_DEFAULT_LOWER="$(printf '%s' "$FOLLOW_ALL_DEFAULT" | tr '[:upper:]' '[:lower:]')"
+case "$FOLLOW_ALL_DEFAULT_LOWER" in
+  1|true|yes|on)
+    FOLLOW_ALL_DEFAULT=1
+    ;;
+  *)
+    FOLLOW_ALL_DEFAULT=0
+    ;;
+esac
+
+if [ "${1:-}" = "--verbose" ] || [ "${1:-}" = "-v" ]; then
+  VERBOSE=1
+  shift
+fi
+
+compose_cmd=()
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  compose_cmd=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  compose_cmd=(docker-compose)
+else
+  echo "docker compose is not available" >&2
+  exit 1
+fi
+
+compose() {
+  (cd "$ROOT" && LOCAL_UID="$HOST_UID" LOCAL_GID="$HOST_GID" "${compose_cmd[@]}" "$@")
+}
+
+compose_legacy_build() {
+  DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 compose "$@"
+}
+
+cleanup_appledouble() {
+  find "$ROOT" -name '._*' -type f -delete 2>/dev/null || true
+}
+
+has_appledouble() {
+  find "$ROOT" -name '._*' -type f -print -quit | grep -q .
+}
+
+is_running() {
+  local id
+  id="$(compose ps --status running -q agent 2>/dev/null || true)"
+  [ -n "$id" ]
+}
+
+ensure_running() {
+  if ! is_running; then
+    cleanup_appledouble
+    if has_appledouble; then
+      compose_legacy_build up -d --build
+    else
+      if ! compose up -d --build; then
+        compose_legacy_build up -d --build
+      fi
+    fi
+  fi
+
+  if ! is_running; then
+    echo "service agent is not running; check logs below" >&2
+    compose logs --tail 200 agent >&2 || true
+    exit 1
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent "natural language prompt"
+  agent --auto "goal"
+  agent submit "prompt"
+  agent --verbose "prompt"
+  agent reset-session
+  agent start-autonomous "goal"
+  agent --verbose --auto "goal"
+  agent list
+  agent status <id>
+  agent wait <id>
+  agent follow <chain-id>
+  agent follow-all
+  agent chain-note <chain-id> "note"
+  agent chain-append <chain-id> "note"
+  agent chain-clear <chain-id>
+  agent chain-stop <chain-id>
+  agent chain-resume <chain-id>
+  agent start
+  agent stop
+  agent logs
+  agent shell [--root]
+EOF
+}
+
+new_session_id() {
+  printf '%s-%s\n' "$(date +%Y%m%d-%H%M%S)" "$RANDOM"
+}
+
+current_session() {
+  if [ -n "${AGENT_SESSION:-}" ]; then
+    echo "$AGENT_SESSION"
+    return 0
+  fi
+  if [ -f "$SESSION_FILE" ]; then
+    cat "$SESSION_FILE"
+    return 0
+  fi
+  local id
+  id="$(new_session_id)"
+  mkdir -p "$SESSION_DIR"
+  echo "$id" > "$SESSION_FILE"
+  echo "$id"
+}
+
+agentctl_exec() {
+  local session
+  session="$(current_session)"
+  if [ -n "$session" ]; then
+    compose exec -T -e AGENT_SESSION="$session" agent agentctl "$@"
+  else
+    compose exec -T agent agentctl "$@"
+  fi
+}
+
+reset_session() {
+  local session
+  session="$(current_session)"
+  ensure_running
+  agentctl_exec reset-session "$session" >/dev/null
+  echo "session reset: $session"
+}
+
+start_follow_all() {
+  if [ -n "$FOLLOW_ALL_PID" ] && kill -0 "$FOLLOW_ALL_PID" 2>/dev/null; then
+    return 0
+  fi
+  agentctl_exec follow-all &
+  FOLLOW_ALL_PID=$!
+}
+
+follow_all_active() {
+  [ -n "$FOLLOW_ALL_PID" ] && kill -0 "$FOLLOW_ALL_PID" 2>/dev/null
+}
+
+stop_follow_all() {
+  if [ -n "$FOLLOW_ALL_PID" ] && kill -0 "$FOLLOW_ALL_PID" 2>/dev/null; then
+    kill "$FOLLOW_ALL_PID" 2>/dev/null || true
+    wait "$FOLLOW_ALL_PID" 2>/dev/null || true
+  fi
+  FOLLOW_ALL_PID=""
+}
+
+submit_and_wait() {
+  ensure_running
+  local session
+  session="$(current_session)"
+  local -a args=("$@")
+  local has_session=0
+  local has_verbose=0
+  local arg
+  for arg in "${args[@]}"; do
+    if [ "$arg" = "--session" ] || [ "$arg" = "-s" ]; then
+      has_session=1
+    elif [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
+      has_verbose=1
+    fi
+  done
+  if [ "$VERBOSE" -eq 1 ] && [ "$has_verbose" -eq 0 ]; then
+    args+=("--verbose")
+  fi
+
+  local id status
+  set +e
+  if [ "$has_session" -eq 1 ]; then
+    id="$(agentctl_exec submit "${args[@]}")"
+    status=$?
+  else
+    id="$(agentctl_exec submit --session "$session" "${args[@]}")"
+    status=$?
+  fi
+  if [ "$status" -ne 0 ] || [ -z "$id" ]; then
+    set -e
+    return "${status:-1}"
+  fi
+  agentctl_exec wait "$id"
+  status=$?
+  set -e
+  return "$status"
+}
+
+start_autonomous_task() {
+  ensure_running
+  local -a args=("$@")
+  local has_session=0
+  local has_verbose=0
+  local arg
+  for arg in "${args[@]}"; do
+    if [ "$arg" = "--session" ] || [ "$arg" = "-s" ]; then
+      has_session=1
+    elif [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
+      has_verbose=1
+    fi
+  done
+  if [ "$VERBOSE" -eq 1 ] && [ "$has_verbose" -eq 0 ]; then
+    args+=("--verbose")
+  fi
+  if [ "$has_session" -eq 0 ]; then
+    local session
+    session="$(current_session)"
+    args=(--session "$session" "${args[@]}")
+  fi
+  agentctl_exec start-autonomous "${args[@]}"
+}
+
+interactive_loop() {
+  ensure_running
+  if [ "$FOLLOW_ALL_DEFAULT" -eq 1 ]; then
+    echo "following all chains (use /follow-stop to pause)"
+    start_follow_all
+  fi
+  while :; do
+    printf "> "
+    if ! IFS= read -r line; then
+      echo
+      break
+    fi
+    if [ -z "$line" ]; then
+      continue
+    fi
+    if [ "$line" = "/quit" ] || [ "$line" = "/exit" ]; then
+      break
+    fi
+    if [ "${line%% *}" = "/auto" ]; then
+      local goal="${line#*/auto}"
+      goal="${goal# }"
+      if [ -z "$goal" ]; then
+        echo "usage: /auto <goal>"
+        continue
+      fi
+      local chain_id
+      chain_id="$(start_autonomous_task "$goal")"
+      echo "chain $chain_id"
+      LAST_CHAIN_ID="$chain_id"
+      if ! follow_all_active; then
+        echo "use /follow $chain_id or /follow-all to stream progress"
+      fi
+      continue
+    fi
+    if [ "${line%% *}" = "/follow" ]; then
+      local chain_id="${line#*/follow}"
+      chain_id="${chain_id# }"
+      if [ -z "$chain_id" ]; then
+        chain_id="$LAST_CHAIN_ID"
+      fi
+      if [ -z "$chain_id" ]; then
+        echo "usage: /follow <chain-id>"
+        continue
+      fi
+      agentctl_exec follow "$chain_id"
+      continue
+    fi
+    if [ "${line%% *}" = "/follow-all" ]; then
+      start_follow_all
+      echo "following all chains"
+      continue
+    fi
+    if [ "${line%% *}" = "/follow-stop" ]; then
+      stop_follow_all
+      echo "follow stopped"
+      continue
+    fi
+    if [ "${line%% *}" = "/note" ] || [ "${line%% *}" = "/note+" ]; then
+      local cmd="${line%% *}"
+      local rest="${line#*$cmd}"
+      rest="${rest# }"
+      if [ -z "$rest" ]; then
+        echo "usage: ${cmd} [chain-id] <note>"
+        continue
+      fi
+      local first="${rest%% *}"
+      local note="$rest"
+      local chain_id="$LAST_CHAIN_ID"
+      if printf '%s' "$first" | grep -Eq '^([0-9]{8}-[0-9]{6}-|[0-9]+)$'; then
+        chain_id="$first"
+        note="${rest#*$first}"
+        note="${note# }"
+      fi
+      if [ -z "$chain_id" ] || [ -z "$note" ]; then
+        echo "usage: ${cmd} [chain-id] <note>"
+        continue
+      fi
+      if [ "$cmd" = "/note+" ]; then
+        agentctl_exec chain-append "$chain_id" "$note"
+      else
+        agentctl_exec chain-note "$chain_id" "$note"
+      fi
+      continue
+    fi
+    if [ "${line%% *}" = "/note-clear" ]; then
+      local chain_id="${line#*/note-clear}"
+      chain_id="${chain_id# }"
+      if [ -z "$chain_id" ]; then
+        chain_id="$LAST_CHAIN_ID"
+      fi
+      if [ -z "$chain_id" ]; then
+        echo "usage: /note-clear <chain-id>"
+        continue
+      fi
+      agentctl_exec chain-clear "$chain_id"
+      continue
+    fi
+    if [ "${line%% *}" = "/stop-current" ]; then
+      agentctl_exec chain-stop-current
+      continue
+    fi
+    if [ "${line%% *}" = "/stop" ]; then
+      local chain_id="${line#*/stop}"
+      chain_id="${chain_id# }"
+      if [ -z "$chain_id" ]; then
+        agentctl_exec chain-stop-all
+      else
+        agentctl_exec chain-stop "$chain_id"
+      fi
+      continue
+    fi
+    if [ "${line%% *}" = "/resume" ]; then
+      local chain_id="${line#*/resume}"
+      chain_id="${chain_id# }"
+      if [ -z "$chain_id" ]; then
+        chain_id="$LAST_CHAIN_ID"
+      fi
+      if [ -z "$chain_id" ]; then
+        echo "usage: /resume <chain-id>"
+        continue
+      fi
+      agentctl_exec chain-resume "$chain_id"
+      continue
+    fi
+    if ! submit_and_wait "$line"; then
+      echo "task failed; see ./agent logs"
+    fi
+  done
+  stop_follow_all
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    ;;
+  start)
+    ensure_running
+    ;;
+  reset-session)
+    reset_session
+    ;;
+  stop)
+    compose stop
+    ;;
+  logs)
+    compose logs -f --tail 200 agent
+    ;;
+  shell)
+    ensure_running
+    if [ "${2:-}" = "--root" ]; then
+      compose exec -u root agent bash
+    else
+      compose exec -u agent agent bash
+    fi
+    ;;
+  list|status|wait)
+    ensure_running
+    agentctl_exec "$@"
+    ;;
+  follow)
+    shift
+    ensure_running
+    agentctl_exec follow "$@"
+    ;;
+  follow-all)
+    ensure_running
+    agentctl_exec follow-all
+    ;;
+  chain-note|chain-append|chain-clear|chain-stop|chain-resume)
+    ensure_running
+    agentctl_exec "$@"
+    ;;
+  start-autonomous)
+    shift
+    chain_id="$(start_autonomous_task "$@")"
+    echo "chain $chain_id"
+    agentctl_exec follow-all
+    ;;
+  submit)
+    shift
+    ensure_running
+    submit_and_wait "$@"
+    ;;
+  --auto)
+    shift
+    chain_id="$(start_autonomous_task "$@")"
+    echo "chain $chain_id"
+    agentctl_exec follow-all
+    ;;
+  chat)
+    interactive_loop
+    ;;
+  "")
+    interactive_loop
+    ;;
+  *)
+    ensure_running
+    submit_and_wait "$@"
+    ;;
+esac

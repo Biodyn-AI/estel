@@ -1,0 +1,54 @@
+Yes, REPL Controls
+
+Lines that do not start with a slash are treated as manual prompts.
+Manual prompts run synchronously and wait for the answer.
+
+Defaults
+- follow-all starts automatically (disable with AGENT_FOLLOW_ALL=0)
+- /follow and /note commands default to the most recent chain id
+- chain ids shown in output are short numeric aliases (1, 2, 3, ...) and reset per session
+
+Commands
+
+/auto <goal>
+  Start a new autonomous chain. Returns immediately with the chain id.
+
+/follow [chain-id]
+  Follow a single chain until it completes. If chain-id is omitted, uses
+  the most recent chain id.
+
+/follow-all
+  Start following outputs from all chains and manual tasks.
+
+/follow-stop
+  Stop the background follow-all stream.
+
+/note [chain-id] <note>
+  Replace chain notes. Notes are injected into future autonomous steps.
+
+/note+ [chain-id] <note>
+  Append to chain notes.
+
+/note-clear [chain-id]
+  Clear chain notes.
+
+/stop [chain-id]
+  If chain-id is provided, stop that chain after the current task finishes.
+  If omitted, stop all chains. Pending queued tasks are purged.
+
+/stop-current
+  Stop the last chain that produced output.
+
+/resume [chain-id]
+  Clear the chain stop request so the chain can continue.
+
+/quit
+/exit
+  Exit the REPL.
+
+Examples
+
+/auto "Review the repo and propose improvements"
+/follow 1
+/note "Keep responses short and focused"
+/stop

@@ -1,0 +1,9 @@
+._*
+.agent
+.git
+.DS_Store
+node_modules
+__pycache__
+.venv
+dist
+build
