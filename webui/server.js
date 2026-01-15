@@ -461,6 +461,24 @@ const handleApi = async (req, res, pathname) => {
     return sendJson(res, 200, stats);
   }
 
+  const chainNoteMatch = pathname.match(/^\/api\/chains\/([^/]+)\/note$/);
+  if (req.method === "POST" && chainNoteMatch) {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.note) {
+      return sendJson(res, 400, { error: "note required" });
+    }
+    const id = decodeURIComponent(chainNoteMatch[1]);
+    await runAgentctl(["chain-append", id, payload.note]);
+    broadcastStateIfChanged();
+    return sendJson(res, 200, { status: "ok" });
+  }
+
   const chainDetailsMatch = pathname.match(/^\/api\/chains\/([^/]+)\/details$/);
   if (req.method === "GET" && chainDetailsMatch) {
     const rawId = decodeURIComponent(chainDetailsMatch[1]);

@@ -410,7 +410,8 @@ body.resizing-horizontal {
 }
 
 .ghost[disabled],
-.primary[disabled] {
+.primary[disabled],
+.danger[disabled] {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;

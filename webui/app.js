@@ -20,6 +20,8 @@ const replStatus = document.getElementById("replStatus");
 const replInput = document.getElementById("replInput");
 const replSend = document.getElementById("replSend");
 const stopCurrent = document.getElementById("stopCurrent");
+const followChain = document.getElementById("followChain");
+const noteChain = document.getElementById("noteChain");
 const followAll = document.getElementById("followAll");
 const metaContainer = document.getElementById("metaContainer");
 const metaSession = document.getElementById("metaSession");
@@ -122,6 +124,28 @@ const isActiveChain = (chain) =>
 
 const getVisibleChains = () =>
   showActiveOnly ? latestChains.filter(isActiveChain) : latestChains;
+
+const getSelectedChainSummary = () =>
+  latestChains.find((chain) => chain.id === selectedChainId) || null;
+
+const getActionChain = () =>
+  getSelectedChainSummary() ||
+  latestChains.find((chain) => chain.id === latestActiveChain) ||
+  latestChains[0] ||
+  null;
+
+const updateChainActions = () => {
+  const hasActive = latestChains.some(isActiveChain);
+  if (stopCurrent) {
+    stopCurrent.disabled = !hasActive;
+    stopCurrent.textContent = hasActive ? "stop current" : "chain is not active";
+  }
+
+  const chain = getActionChain();
+  const canAct = Boolean(chain);
+  if (followChain) followChain.disabled = !canAct;
+  if (noteChain) noteChain.disabled = !canAct;
+};
 
 const formatTimestamp = (value) => {
   if (!value) return "";
@@ -569,6 +593,7 @@ const renderChains = (chains, activeId) => {
     empty.className = "chain-item";
     empty.textContent = "No chains yet. Create one to get started.";
     chainList.appendChild(empty);
+    updateChainActions();
     return;
   }
 
@@ -615,6 +640,7 @@ const renderChains = (chains, activeId) => {
   }
 
   updateReplStatus(chains, activeId);
+  updateChainActions();
 };
 
 const updateReplStatus = (chains, activeId) => {
@@ -1089,6 +1115,7 @@ if (chainList) {
     if (editorView === "chain") {
       refreshChainDetails();
     }
+    updateChainActions();
   });
 }
 
@@ -1140,6 +1167,33 @@ if (stopCurrent) {
   stopCurrent.addEventListener("click", async () => {
     try {
       await postJson("/api/stop-current");
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (followChain) {
+  followChain.addEventListener("click", () => {
+    const chain = getActionChain();
+    if (!chain) return;
+    selectedChainId = chain.id;
+    renderChains(latestChains, latestActiveChain);
+    setEditorView("chain");
+  });
+}
+
+if (noteChain) {
+  noteChain.addEventListener("click", async () => {
+    const chain = getActionChain();
+    if (!chain) return;
+    const label = chain.displayId || chain.chainId || chain.id;
+    const note = window.prompt(`Append a note for chain ${label}:`);
+    if (!note) return;
+    try {
+      await postJson(`/api/chains/${encodeURIComponent(chain.chainId || chain.id)}/note`, {
+        note,
+      });
     } catch (err) {
       console.error(err);
     }
