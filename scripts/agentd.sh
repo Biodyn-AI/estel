@@ -26,6 +26,18 @@ AUTONOMOUS_CONTEXT_LIMIT="${AUTONOMOUS_CONTEXT_LIMIT:-4000}"
 SESSION_CONTEXT_LIMIT="${SESSION_CONTEXT_LIMIT:-8000}"
 SHUTDOWN=0
 
+if [ -z "${HOME:-}" ] || [ "$HOME" = "/root" ]; then
+  HOME_DIR="$(getent passwd "$(id -u)" | cut -d: -f6)"
+  if [ -z "$HOME_DIR" ]; then
+    HOME_DIR="/home/agent"
+  fi
+  export HOME="$HOME_DIR"
+fi
+
+if [ -z "${USER:-}" ] || [ "$USER" = "root" ]; then
+  export USER="$(id -un)"
+fi
+
 log() {
   local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
   echo "$msg"

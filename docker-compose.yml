@@ -14,6 +14,8 @@ services:
     environment:
       LOCAL_UID: "${LOCAL_UID:-1000}"
       LOCAL_GID: "${LOCAL_GID:-1000}"
+      HOME: /home/agent
+      USER: agent
       AGENT_WORKERS: "${AGENT_WORKERS:-1}"
       POLL_SECONDS: "${POLL_SECONDS:-2}"
       CODEX_FLAGS: "${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C /workspace}"
