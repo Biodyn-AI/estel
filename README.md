@@ -1,7 +1,7 @@
 # AutoAgents (Dockerized)
 
 Run Codex CLI agents inside a Docker container with a durable queue, REPL, and autonomous chains.
-This project is designed to use a Codex subscription via the CLI (no API tokens) while keeping
+This project is desiOegned to use a Codex subscription via the CLI (no API tokens) while keeping
 the host system isolated.
 
 ## What this gives you
@@ -175,6 +175,22 @@ cat REPL_CONTROLS.MLD
 
 In the REPL, `follow-all` starts automatically. Set `AGENT_FOLLOW_ALL=0` to disable.
 
+## Web UI
+
+A lightweight IDE-style dashboard lives in `webui/` and can be served from the container.
+
+Start it:
+
+```
+./agent start
+docker compose up -d ui
+```
+
+Then open `http://localhost:5177`.
+
+The UI uses the `UI_SESSION` (default `webui`) to keep manual REPL history and uses the
+shared queue to create and observe chains.
+
 ## Pausing processing
 
 You can pause the queue without stopping the container:
@@ -271,6 +287,8 @@ Container variables (set via environment or `docker-compose.yml`):
 - `LOG_FILE`                 Log file path (default `/workspace/logs/agentd.log`).
 - `FOLLOW_POLL_SECONDS`      Poll interval for follow commands.
 - `FOLLOW_INCLUDE_DONE`      Set to `1` to print prior completed outputs.
+- `UI_SESSION`               Session id used by the Web UI (default `webui`).
+- `UI_PORT`                  Host port for the Web UI (default `5177`).
 
 ## Notes on security and isolation
 

@@ -26,5 +26,27 @@ services:
     tty: true
     stdin_open: true
     command: ["agentd"]
+  ui:
+    image: agents-agent
+    container_name: agents-ui
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - codex_home:/home/agent/.codex
+    environment:
+      HOME: /home/agent
+      USER: agent
+      LOCAL_UID: "${LOCAL_UID:-1000}"
+      LOCAL_GID: "${LOCAL_GID:-1000}"
+      WORKSPACE: /workspace
+      QUEUE_DIR: /workspace/queue
+      LOG_FILE: /workspace/logs/agentd.log
+      UI_SESSION: "${UI_SESSION:-webui}"
+      UI_PORT: "${UI_PORT:-5177}"
+    ports:
+      - "${UI_PORT:-5177}:5177"
+    depends_on:
+      - agent
+    command: ["node", "/workspace/webui/server.js"]
 volumes:
   codex_home:
