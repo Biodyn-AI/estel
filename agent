@@ -1,7 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_self() {
+  local source="${BASH_SOURCE[0]}"
+  while [ -h "$source" ]; do
+    local dir
+    dir="$(cd -P "$(dirname "$source")" && pwd)"
+    source="$(readlink "$source")"
+    if [[ "$source" != /* ]]; then
+      source="$dir/$source"
+    fi
+  done
+  local dir
+  dir="$(cd -P "$(dirname "$source")" && pwd)"
+  echo "$dir/$(basename "$source")"
+}
+
+SELF_PATH="$(resolve_self)"
+ROOT="$(cd "$(dirname "$SELF_PATH")" && pwd)"
 SESSION_DIR="${AGENT_SESSION_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codex-agent}"
 SESSION_FILE="${SESSION_DIR}/session"
 HOST_UID="${LOCAL_UID:-$(id -u)}"
@@ -97,6 +113,8 @@ Usage:
   agent chain-clear <chain-id>
   agent chain-stop <chain-id>
   agent chain-resume <chain-id>
+  agent install [--name <cmd>] [--bin-dir <path>] [--add-path]
+  agent uninstall [--name <cmd>] [--bin-dir <path>]
   agent start
   agent stop
   agent logs
@@ -224,8 +242,97 @@ start_autonomous_task() {
   agentctl_exec start-autonomous "${args[@]}"
 }
 
+install_cmd() {
+  local bin_dir="${AUTOAGENTS_BIN_DIR:-$HOME/.local/bin}"
+  local name="${AUTOAGENTS_BIN_NAME:-autoagents}"
+  local add_path=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bin-dir)
+        bin_dir="${2:-}"
+        shift 2
+        ;;
+      --name)
+        name="${2:-}"
+        shift 2
+        ;;
+      --add-path)
+        add_path=1
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ -z "$bin_dir" ] || [ -z "$name" ]; then
+    echo "usage: agent install [--name <cmd>] [--bin-dir <path>] [--add-path]" >&2
+    exit 1
+  fi
+  mkdir -p "$bin_dir"
+  ln -sf "$SELF_PATH" "$bin_dir/$name"
+  echo "installed: $bin_dir/$name"
+  if ! printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$bin_dir" >/dev/null 2>&1; then
+    if [ "$add_path" -eq 1 ]; then
+      local rc
+      case "${SHELL:-}" in
+        */zsh)
+          rc="$HOME/.zshrc"
+          ;;
+        */bash)
+          rc="$HOME/.bashrc"
+          ;;
+        *)
+          rc="$HOME/.profile"
+          ;;
+      esac
+      if ! grep -Fq "$bin_dir" "$rc" 2>/dev/null; then
+        printf '\nexport PATH="%s:$PATH"\n' "$bin_dir" >> "$rc"
+        echo "added PATH to $rc"
+      else
+        echo "PATH already includes $bin_dir in $rc"
+      fi
+      echo "reload shell: source $rc"
+    else
+      echo "add to PATH: export PATH=\"$bin_dir:\$PATH\""
+    fi
+  fi
+}
+
+uninstall_cmd() {
+  local bin_dir="${AUTOAGENTS_BIN_DIR:-$HOME/.local/bin}"
+  local name="${AUTOAGENTS_BIN_NAME:-autoagents}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bin-dir)
+        bin_dir="${2:-}"
+        shift 2
+        ;;
+      --name)
+        name="${2:-}"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ -z "$bin_dir" ] || [ -z "$name" ]; then
+    echo "usage: agent uninstall [--name <cmd>] [--bin-dir <path>]" >&2
+    exit 1
+  fi
+  if [ -e "$bin_dir/$name" ]; then
+    rm -f "$bin_dir/$name"
+    echo "removed: $bin_dir/$name"
+  else
+    echo "not found: $bin_dir/$name"
+  fi
+}
+
 interactive_loop() {
   ensure_running
+  echo "AutoAgents REPL ready."
+  echo "Enter a prompt or /auto <goal>. /follow-all streams; /follow-stop pauses; /exit quits."
   if [ "$FOLLOW_ALL_DEFAULT" -eq 1 ]; then
     echo "following all chains (use /follow-stop to pause)"
     start_follow_all
@@ -395,6 +502,12 @@ case "${1:-}" in
   chain-note|chain-append|chain-clear|chain-stop|chain-resume)
     ensure_running
     agentctl_exec "$@"
+    ;;
+  install)
+    install_cmd "${@:2}"
+    ;;
+  uninstall)
+    uninstall_cmd "${@:2}"
     ;;
   start-autonomous)
     shift
