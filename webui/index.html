@@ -22,6 +22,7 @@
           </div>
         </div>
         <div class="topbar-meta">
+          <button id="themeToggle" class="ghost theme-toggle" type="button">night mode</button>
           <span class="pill" id="metaContainer">container: --</span>
           <span class="pill alt" id="metaSession">session: --</span>
         </div>
@@ -103,6 +104,13 @@
 
       <section class="pane repl" id="paneRepl">
         <div class="pane-header"></div>
+        <div class="repl-toolbar">
+          <div class="repl-tabs" id="replTabs"></div>
+          <div class="repl-actions">
+            <button id="replNewManual" class="ghost" type="button">+manual</button>
+            <button id="replNewAuto" class="ghost" type="button">+auto</button>
+          </div>
+        </div>
         <div class="repl-status" id="replStatus">thinking: idle</div>
         <div class="repl-body" id="replBody"></div>
         <form class="repl-input">
@@ -127,6 +135,44 @@
         <div class="modal-actions">
           <button id="noteCancel" class="ghost" type="button">Cancel</button>
           <button id="noteSubmit" class="primary" type="button">Append note</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="chainModal" aria-hidden="true">
+      <div class="modal-backdrop" data-action="close-chain"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="chainTitle">
+        <div class="modal-header">
+          <div class="modal-title" id="chainTitle">Start new chain</div>
+          <div class="modal-subtitle" id="chainModeLabel">Mode: manual</div>
+        </div>
+        <textarea
+          id="chainInput"
+          rows="6"
+          placeholder="Describe the goal or task to start this chain..."
+        ></textarea>
+        <div class="modal-actions">
+          <button id="chainCancel" class="ghost" type="button">Cancel</button>
+          <button id="chainSubmit" class="primary" type="button">Create chain</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="renameTabModal" aria-hidden="true">
+      <div class="modal-backdrop" data-action="close-rename"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="renameTabTitle">
+        <div class="modal-header">
+          <div class="modal-title" id="renameTabTitle">Rename tab</div>
+          <div class="modal-subtitle" id="renameTabLabel">Chain --</div>
+        </div>
+        <input
+          id="renameTabInput"
+          type="text"
+          placeholder="New tab label"
+        />
+        <div class="modal-actions">
+          <button id="renameTabCancel" class="ghost" type="button">Cancel</button>
+          <button id="renameTabSubmit" class="primary" type="button">Rename tab</button>
         </div>
       </div>
     </div>

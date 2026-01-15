@@ -176,6 +176,22 @@ const readAliasMap = (session) => {
   return chainToAlias;
 };
 
+const readAliasReverseMap = (session) => {
+  const key = session.replace(/[^A-Za-z0-9._-]/g, "_");
+  const aliasFile = path.join(QUEUE_DIR, "chains", `aliases.${key}.tsv`);
+  const aliasToChain = new Map();
+  if (!fs.existsSync(aliasFile)) return aliasToChain;
+  const lines = fs.readFileSync(aliasFile, "utf8").split(/\r?\n/);
+  lines.forEach((line) => {
+    if (!line.trim()) return;
+    const [alias, chainId] = line.split(/\t+/);
+    if (alias && chainId) {
+      aliasToChain.set(alias.trim(), chainId.trim());
+    }
+  });
+  return aliasToChain;
+};
+
 const parseTimestamp = (value) => {
   if (!value) return 0;
   const ts = Date.parse(value);
@@ -414,6 +430,63 @@ const loadReplLines = () => {
   return tailLines(LOG_FILE, 80);
 };
 
+const sanitizeChainId = (chainId) =>
+  (chainId || "").replace(/[^A-Za-z0-9._-]/g, "_");
+
+const chainReplFile = (session, chainId) =>
+  path.join(QUEUE_DIR, "sessions", `${session}.chain.${sanitizeChainId(chainId)}.repl.md`);
+
+const loadChainReplLines = (chainId) => {
+  if (!chainId) return [];
+  const replFile = chainReplFile(UI_SESSION, chainId);
+  if (fs.existsSync(replFile)) {
+    const content = fs.readFileSync(replFile, "utf8");
+    const entries = parseSessionHistory(content);
+    return entries.slice(-80);
+  }
+  return [];
+};
+
+const appendChainReplHistory = (chainId, userPrompt, assistantOutput) => {
+  if (!chainId) return;
+  const file = chainReplFile(UI_SESSION, chainId);
+  fs.appendFileSync(
+    file,
+    `User:\n${userPrompt}\n\nAssistant:\n${assistantOutput}\n\n`,
+    "utf8"
+  );
+};
+
+const resolveChainToken = (rawId, tasks) => {
+  if (!rawId) return "";
+  if (rawId.startsWith("manual:")) {
+    return rawId.slice("manual:".length);
+  }
+  const aliasMap = readAliasReverseMap(UI_SESSION);
+  if (/^\d+$/.test(rawId)) {
+    const normalized = rawId.replace(/^0+/, "") || "0";
+    const mapped = aliasMap.get(normalized);
+    if (mapped) return mapped;
+  }
+  const runTask = path.join(QUEUE_DIR, "runs", rawId, "task.json");
+  if (fs.existsSync(runTask)) {
+    const task = readJson(runTask);
+    if (task) {
+      const chainId = task.chain || task.manual_chain || task.manualChain;
+      if (chainId) return chainId;
+    }
+  }
+  const taskList = tasks || loadTasks();
+  const chains = buildChains(taskList);
+  const direct =
+    chains.find((entry) => entry.id === rawId) ||
+    chains.find((entry) => entry.chainId === rawId) ||
+    chains.find((entry) => entry.displayId === rawId) ||
+    null;
+  if (direct) return direct.chainId;
+  return rawId;
+};
+
 const runAgentctl = (args) =>
   new Promise((resolve, reject) => {
     const child = spawn("agentctl", args, {
@@ -484,9 +557,58 @@ const handleApi = async (req, res, pathname) => {
       return sendJson(res, 400, { error: "note required" });
     }
     const id = decodeURIComponent(chainNoteMatch[1]);
-    await runAgentctl(["chain-append", id, payload.note]);
+    const output = await runAgentctl(["chain-append", id, payload.note]);
+    const chainId = resolveChainToken(id);
+    appendChainReplHistory(chainId, payload.note, output || "note appended");
     broadcastStateIfChanged();
     return sendJson(res, 200, { status: "ok" });
+  }
+
+  const chainNoteSetMatch = pathname.match(/^\/api\/chains\/([^/]+)\/note-set$/);
+  if (req.method === "POST" && chainNoteSetMatch) {
+    const body = await readBody(req);
+    let payload = {};
+    try {
+      payload = body ? JSON.parse(body) : {};
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON payload" });
+    }
+    if (!payload.note) {
+      return sendJson(res, 400, { error: "note required" });
+    }
+    const id = decodeURIComponent(chainNoteSetMatch[1]);
+    const output = await runAgentctl(["chain-note", id, payload.note]);
+    const chainId = resolveChainToken(id);
+    appendChainReplHistory(chainId, payload.note, output || "note set");
+    broadcastStateIfChanged();
+    return sendJson(res, 200, { status: "ok" });
+  }
+
+  const chainNoteClearMatch = pathname.match(/^\/api\/chains\/([^/]+)\/note-clear$/);
+  if (req.method === "POST" && chainNoteClearMatch) {
+    const id = decodeURIComponent(chainNoteClearMatch[1]);
+    const output = await runAgentctl(["chain-clear", id]);
+    const chainId = resolveChainToken(id);
+    appendChainReplHistory(chainId, "/note-clear", output || "note cleared");
+    broadcastStateIfChanged();
+    return sendJson(res, 200, { status: "ok" });
+  }
+
+  const chainResumeMatch = pathname.match(/^\/api\/chains\/([^/]+)\/resume$/);
+  if (req.method === "POST" && chainResumeMatch) {
+    const id = decodeURIComponent(chainResumeMatch[1]);
+    const output = await runAgentctl(["chain-resume", id]);
+    const chainId = resolveChainToken(id);
+    appendChainReplHistory(chainId, "/resume", output || "resume requested");
+    broadcastStateIfChanged();
+    return sendJson(res, 200, { status: "ok" });
+  }
+
+  const chainReplMatch = pathname.match(/^\/api\/chains\/([^/]+)\/repl$/);
+  if (req.method === "GET" && chainReplMatch) {
+    const rawId = decodeURIComponent(chainReplMatch[1]);
+    const chainId = resolveChainToken(rawId);
+    return sendJson(res, 200, { id: rawId, chainId, repl: loadChainReplLines(chainId) });
   }
 
   const chainDetailsMatch = pathname.match(/^\/api\/chains\/([^/]+)\/details$/);
@@ -709,8 +831,10 @@ const handleApi = async (req, res, pathname) => {
 
   const chainStopMatch = pathname.match(/^\/api\/chains\/([^/]+)\/stop$/);
   if (req.method === "POST" && chainStopMatch) {
-    const id = chainStopMatch[1];
-    await runAgentctl(["chain-stop", id]);
+    const rawId = decodeURIComponent(chainStopMatch[1]);
+    const output = await runAgentctl(["chain-stop", rawId]);
+    const chainId = resolveChainToken(rawId);
+    appendChainReplHistory(chainId, "/stop", output || "stop requested");
     broadcastStateIfChanged();
     return sendJson(res, 200, { status: "ok" });
   }

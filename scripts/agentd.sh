@@ -131,6 +131,22 @@ repl_session_file() {
   echo "${SESSIONS_DIR}/${session_id}.repl.md"
 }
 
+sanitize_chain_id() {
+  local chain_id="$1"
+  if [ -z "$chain_id" ]; then
+    return 0
+  fi
+  printf '%s' "$chain_id" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+chain_repl_file() {
+  local session_id="$1"
+  local chain_id="$2"
+  local safe
+  safe="$(sanitize_chain_id "$chain_id")"
+  echo "${SESSIONS_DIR}/${session_id}.chain.${safe}.repl.md"
+}
+
 chain_note_file() {
   local chain_id="$1"
   echo "${CHAINS_DIR}/${chain_id}.note"
@@ -212,6 +228,21 @@ append_repl_history() {
   fi
   local file
   file="$(repl_session_file "$session_id")"
+  {
+    printf 'User:\n%s\n\nAssistant:\n%s\n\n' "$user_prompt" "$assistant_output"
+  } >> "$file"
+}
+
+append_chain_repl_history() {
+  local session_id="$1"
+  local chain_id="$2"
+  local user_prompt="$3"
+  local assistant_output="$4"
+  if [ -z "$session_id" ] || [ -z "$chain_id" ]; then
+    return 0
+  fi
+  local file
+  file="$(chain_repl_file "$session_id" "$chain_id")"
   {
     printf 'User:\n%s\n\nAssistant:\n%s\n\n' "$user_prompt" "$assistant_output"
   } >> "$file"
@@ -507,11 +538,12 @@ suggest_next_task() {
 process_task() {
   local task_file="$1"
   local worker_id="$2"
-  local id mode prompt raw_prompt goal task chain context session task_verbose verbose note
+  local id mode prompt raw_prompt goal task chain context session task_verbose verbose note manual_chain chain_log_id
 
   id="$(jq -r '.id // empty' "$task_file")"
   mode="$(jq -r '.mode // empty' "$task_file")"
   chain="$(jq -r '.chain // empty' "$task_file")"
+  manual_chain="$(jq -r '.manual_chain // .manualChain // empty' "$task_file")"
   goal="$(jq -r '.goal // empty' "$task_file")"
   task="$(jq -r '.task // empty' "$task_file")"
   context="$(jq -r '.context // empty' "$task_file")"
@@ -534,6 +566,12 @@ process_task() {
     log "invalid task file: $task_file"
     rm -f "$task_file"
     return 1
+  fi
+
+  if [ "$mode" = "autonomous" ]; then
+    chain_log_id="${chain:-$id}"
+  else
+    chain_log_id="${manual_chain:-$id}"
   fi
 
   local run_dir="${RUNS_DIR}/${id}"
@@ -585,6 +623,7 @@ process_task() {
     printf 'DONE\nChain stopped by user.\n' > "$output_file"
     append_chain_summary "$chain" "$output_file" "Chain stopped by user." 1 "$id"
     append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
+    append_chain_repl_history "$session" "$chain_log_id" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
     record_last_output_chain "${chain:-$id}"
     cp "$output_file" "$OUTBOX_DIR/$id.md"
     rm -f "$task_file"
@@ -598,11 +637,13 @@ process_task() {
     if [ "$mode" = "manual" ] && [ -n "$session" ]; then
       append_session_history "$session" "$raw_prompt" "$(cat "$output_file")"
       append_repl_history "$session" "$raw_prompt" "$(cat "$output_file")"
+      append_chain_repl_history "$session" "$chain_log_id" "$raw_prompt" "$(cat "$output_file")"
     fi
 
     if [ "$mode" = "autonomous" ]; then
       record_last_output_chain "${chain:-$id}"
       append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
+      append_chain_repl_history "$session" "$chain_log_id" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
       local next_task result next_id
       local chain_done=0
       local chain_reason=""
@@ -660,6 +701,7 @@ process_task() {
     if [ "$mode" = "autonomous" ]; then
       record_last_output_chain "${chain:-$id}"
       append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
+      append_chain_repl_history "$session" "$chain_log_id" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
     fi
   fi
 

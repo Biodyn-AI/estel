@@ -19,17 +19,31 @@ const replBody = document.getElementById("replBody");
 const replStatus = document.getElementById("replStatus");
 const replInput = document.getElementById("replInput");
 const replSend = document.getElementById("replSend");
+const replTabs = document.getElementById("replTabs");
+const replNewManual = document.getElementById("replNewManual");
+const replNewAuto = document.getElementById("replNewAuto");
 const stopCurrent = document.getElementById("stopCurrent");
 const followChain = document.getElementById("followChain");
 const noteChain = document.getElementById("noteChain");
 const followAll = document.getElementById("followAll");
 const metaContainer = document.getElementById("metaContainer");
 const metaSession = document.getElementById("metaSession");
+const themeToggle = document.getElementById("themeToggle");
 const noteModal = document.getElementById("noteModal");
 const noteInput = document.getElementById("noteInput");
 const noteSubmit = document.getElementById("noteSubmit");
 const noteCancel = document.getElementById("noteCancel");
 const noteChainLabel = document.getElementById("noteChainLabel");
+const chainModal = document.getElementById("chainModal");
+const chainInput = document.getElementById("chainInput");
+const chainSubmit = document.getElementById("chainSubmit");
+const chainCancel = document.getElementById("chainCancel");
+const chainModeLabel = document.getElementById("chainModeLabel");
+const renameTabModal = document.getElementById("renameTabModal");
+const renameTabInput = document.getElementById("renameTabInput");
+const renameTabSubmit = document.getElementById("renameTabSubmit");
+const renameTabCancel = document.getElementById("renameTabCancel");
+const renameTabLabel = document.getElementById("renameTabLabel");
 const workspace = document.getElementById("workspace");
 const paneTree = document.getElementById("paneTree");
 const paneEditor = document.getElementById("paneEditor");
@@ -60,6 +74,12 @@ let statsSnapshot = null;
 let statsLoading = null;
 const statsCache = new Map();
 let noteTargetChain = null;
+let latestReplLines = [];
+let activeReplTabId = "main";
+let pendingChainMode = "manual";
+let renameTargetTab = null;
+const replTabsState = [{ id: "main", type: "main", mode: "main", chainToken: "" }];
+const chainReplCache = new Map();
 const treeCache = new Map();
 const openFolders = new Set([""]);
 let poller = null;
@@ -102,6 +122,164 @@ const putJson = async (url, payload) => {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const THEME_KEY = "autoagents-theme";
+const REPL_TAB_LABEL_KEY = "autoagents-repl-tab-labels";
+
+const applyTheme = (theme) => {
+  const normalized = theme === "dark" ? "dark" : "light";
+  if (document.body) {
+    document.body.dataset.theme = normalized;
+  }
+  if (themeToggle) {
+    themeToggle.textContent = normalized === "dark" ? "day mode" : "night mode";
+  }
+};
+
+const initTheme = () => {
+  const stored = window.localStorage ? localStorage.getItem(THEME_KEY) : null;
+  if (stored === "dark" || stored === "light") {
+    applyTheme(stored);
+    return;
+  }
+  const prefersDark = window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches
+    : false;
+  applyTheme(prefersDark ? "dark" : "light");
+};
+
+const replTabLabels = new Map();
+
+const loadReplTabLabels = () => {
+  if (!window.localStorage) return;
+  const raw = localStorage.getItem(REPL_TAB_LABEL_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      Object.entries(parsed).forEach(([key, value]) => {
+        if (key && typeof value === "string" && value.trim()) {
+          replTabLabels.set(key, value.trim());
+        }
+      });
+    }
+  } catch {
+    // ignore invalid storage
+  }
+};
+
+const persistReplTabLabels = () => {
+  if (!window.localStorage) return;
+  const payload = {};
+  replTabLabels.forEach((value, key) => {
+    if (value) payload[key] = value;
+  });
+  localStorage.setItem(REPL_TAB_LABEL_KEY, JSON.stringify(payload));
+};
+
+const getActiveReplTab = () =>
+  replTabsState.find((tab) => tab.id === activeReplTabId) || replTabsState[0];
+
+const shortToken = (token) => {
+  if (!token) return "--";
+  return token.length > 8 ? token.slice(-4) : token;
+};
+
+const findChainForTab = (tab) => {
+  if (!tab || tab.type === "main") return null;
+  const token = tab.chainToken;
+  if (!token) return null;
+  return (
+    latestChains.find((chain) => chain.id === token) ||
+    latestChains.find((chain) => chain.chainId === token) ||
+    latestChains.find((chain) => chain.id === `manual:${token}`) ||
+    latestChains.find((chain) => chain.displayId === token) ||
+    (token.match(/^\d+$/)
+      ? latestChains.find((chain) => chain.displayId === token.padStart(2, "0"))
+      : null)
+  );
+};
+
+const replTabLabel = (tab) => {
+  if (!tab) return "--";
+  if (tab.type === "main") return "main";
+  if (tab.customLabel) return tab.customLabel;
+  const chain = findChainForTab(tab);
+  if (chain?.displayId) return chain.displayId;
+  const prefix = tab.mode === "auto" ? "A-" : "M-";
+  return `${prefix}${shortToken(tab.chainToken)}`;
+};
+
+const renderReplTabs = () => {
+  if (!replTabs) return;
+  replTabs.innerHTML = "";
+  replTabsState.forEach((tab) => {
+    const chain = findChainForTab(tab);
+    const modeClass = tab.type === "main" ? "main" : chain?.mode || tab.mode;
+    const tabEl = document.createElement("div");
+    tabEl.className = `repl-tab ${modeClass}${tab.id === activeReplTabId ? " active" : ""}`;
+
+    const labelBtn = document.createElement("button");
+    labelBtn.type = "button";
+    labelBtn.className = "repl-tab-label";
+    labelBtn.textContent = replTabLabel(tab);
+    labelBtn.title = tab.type === "main" ? "Main REPL" : "Double-click to rename";
+    labelBtn.addEventListener("click", () => {
+      activeReplTabId = tab.id;
+      renderReplTabs();
+      refreshReplView();
+    });
+    if (tab.type !== "main") {
+      labelBtn.addEventListener("dblclick", () => {
+        openRenameTabModal(tab);
+      });
+    }
+    tabEl.appendChild(labelBtn);
+
+    if (tab.type !== "main") {
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "repl-tab-close";
+      closeBtn.textContent = "x";
+      closeBtn.title = "Close tab";
+      closeBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeReplTab(tab.id);
+      });
+      tabEl.appendChild(closeBtn);
+    }
+
+    replTabs.appendChild(tabEl);
+  });
+};
+
+const ensureChainTab = (chainToken, mode) => {
+  if (!chainToken) return null;
+  const tabId = `chain:${chainToken}`;
+  let tab = replTabsState.find((entry) => entry.id === tabId);
+  if (!tab) {
+    tab = {
+      id: tabId,
+      type: "chain",
+      mode: mode || "manual",
+      chainToken,
+      customLabel: replTabLabels.get(chainToken) || "",
+    };
+    replTabsState.push(tab);
+  }
+  return tab;
+};
+
+const closeReplTab = (tabId) => {
+  const idx = replTabsState.findIndex((tab) => tab.id === tabId);
+  if (idx === -1) return;
+  if (replTabsState[idx].type === "main") return;
+  replTabsState.splice(idx, 1);
+  if (activeReplTabId === tabId) {
+    activeReplTabId = replTabsState[0]?.id || "main";
+  }
+  renderReplTabs();
+  refreshReplView();
+};
 const setWorkspaceColumns = (left, middle, right) => {
   if (!workspace) return;
   workspace.style.gridTemplateColumns = `${left}px 6px ${middle}px 6px ${right}px`;
@@ -171,6 +349,46 @@ const closeNoteModal = () => {
   noteTargetChain = null;
   noteModal.classList.add("hidden");
   noteModal.setAttribute("aria-hidden", "true");
+};
+
+const openChainModal = (mode) => {
+  if (!chainModal || !chainInput || !chainModeLabel) return;
+  pendingChainMode = mode || "manual";
+  chainModeLabel.textContent = `Mode: ${pendingChainMode}`;
+  chainInput.value = "";
+  chainModal.classList.remove("hidden");
+  chainModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    chainInput.focus();
+  }, 0);
+};
+
+const closeChainModal = () => {
+  if (!chainModal) return;
+  chainModal.classList.add("hidden");
+  chainModal.setAttribute("aria-hidden", "true");
+};
+
+const openRenameTabModal = (tab) => {
+  if (!renameTabModal || !renameTabInput || !renameTabLabel) return;
+  renameTargetTab = tab;
+  const label = tab.customLabel || replTabLabel(tab);
+  renameTabInput.value = label === "--" ? "" : label;
+  const chain = findChainForTab(tab);
+  renameTabLabel.textContent = `Chain ${chain?.displayId || tab.chainToken || "--"}`;
+  renameTabModal.classList.remove("hidden");
+  renameTabModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    renameTabInput.focus();
+    renameTabInput.select();
+  }, 0);
+};
+
+const closeRenameTabModal = () => {
+  if (!renameTabModal) return;
+  renameTargetTab = null;
+  renameTabModal.classList.add("hidden");
+  renameTabModal.setAttribute("aria-hidden", "true");
 };
 
 const formatTimestamp = (value) => {
@@ -672,13 +890,18 @@ const renderChains = (chains, activeId) => {
 const updateReplStatus = (chains, activeId) => {
   if (!replStatus) return;
   let status = "";
-  if (activeId) {
-    const active = chains.find((chain) => chain.id === activeId);
-    status = active?.statusLine || "";
-  }
-  if (!status) {
-    const working = chains.find((chain) => chain.status === "working" && chain.statusLine);
-    status = working?.statusLine || "";
+  const tab = getActiveReplTab();
+  if (tab && tab.type !== "main") {
+    status = findChainForTab(tab)?.statusLine || "";
+  } else {
+    if (activeId) {
+      const active = chains.find((chain) => chain.id === activeId);
+      status = active?.statusLine || "";
+    }
+    if (!status) {
+      const working = chains.find((chain) => chain.status === "working" && chain.statusLine);
+      status = working?.statusLine || "";
+    }
   }
   replStatus.textContent = status ? `thinking: ${status}` : "thinking: idle";
 };
@@ -700,6 +923,36 @@ const renderRepl = (lines) => {
     replBody.appendChild(entry);
   });
   replBody.scrollTop = replBody.scrollHeight;
+};
+
+const refreshChainRepl = async (tab, force = false) => {
+  if (!tab || tab.type === "main") return;
+  const token = tab.chainToken;
+  if (!token) return;
+  const cached = chainReplCache.get(token);
+  if (!force && cached && Date.now() - cached.fetchedAt < 1200) {
+    renderRepl(cached.lines || []);
+    return;
+  }
+  try {
+    const data = await fetchJson(`/api/chains/${encodeURIComponent(token)}/repl`);
+    const lines = data.repl || [];
+    chainReplCache.set(token, { lines, fetchedAt: Date.now() });
+    renderRepl(lines);
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const refreshReplView = () => {
+  const tab = getActiveReplTab();
+  if (!tab || tab.type === "main") {
+    renderRepl(latestReplLines || []);
+    updateReplStatus(latestChains, latestActiveChain);
+    return;
+  }
+  refreshChainRepl(tab, true);
+  updateReplStatus(latestChains, latestActiveChain);
 };
 
 const updateMeta = (meta) => {
@@ -1048,8 +1301,14 @@ const initSplitters = () => {
 };
 
 const handleState = (data) => {
+  latestReplLines = data.repl || [];
   renderChains(data.chains || [], data.activeChain || null);
-  renderRepl(data.repl || []);
+  renderReplTabs();
+  if (getActiveReplTab()?.type === "main") {
+    renderRepl(latestReplLines || []);
+  } else {
+    refreshChainRepl(getActiveReplTab());
+  }
   updateMeta(data.meta || {});
   refreshChainDetails();
   refreshStats();
@@ -1085,7 +1344,7 @@ const startStream = () => {
   };
 };
 
-const sendReplInput = async (input) => {
+const sendMainReplInput = async (input) => {
   if (!input) return;
   const trimmed = input.trim();
   if (!trimmed) return;
@@ -1109,6 +1368,52 @@ const sendReplInput = async (input) => {
   }
 
   await postJson("/api/repl", { input: trimmed });
+};
+
+const sendChainReplInput = async (tab, input) => {
+  if (!tab || tab.type === "main") return;
+  const trimmed = input.trim();
+  if (!trimmed) return;
+  const token = tab.chainToken;
+  if (!token) return;
+
+  const noteAppendMatch = trimmed.match(/^\/note\+\s*(.*)$/i);
+  if (noteAppendMatch) {
+    const note = noteAppendMatch[1]?.trim();
+    if (!note) return;
+    await postJson(`/api/chains/${encodeURIComponent(token)}/note`, { note });
+    return;
+  }
+
+  const noteMatch = trimmed.match(/^\/note\s+(.*)$/i);
+  if (noteMatch && noteMatch[1]) {
+    await postJson(`/api/chains/${encodeURIComponent(token)}/note-set`, {
+      note: noteMatch[1].trim(),
+    });
+    return;
+  }
+
+  if (/^\/note-clear\b/i.test(trimmed)) {
+    await postJson(`/api/chains/${encodeURIComponent(token)}/note-clear`);
+    return;
+  }
+
+  if (/^\/stop\b/i.test(trimmed)) {
+    await postJson(`/api/chains/${encodeURIComponent(token)}/stop`);
+    return;
+  }
+
+  if (/^\/resume\b/i.test(trimmed)) {
+    await postJson(`/api/chains/${encodeURIComponent(token)}/resume`);
+    return;
+  }
+
+  if (trimmed.startsWith("/")) {
+    await postJson(`/api/chains/${encodeURIComponent(token)}/note`, { note: trimmed });
+    return;
+  }
+
+  await postJson(`/api/chains/${encodeURIComponent(token)}/note`, { note: trimmed });
 };
 
 const getParentPath = (path) => {
@@ -1154,25 +1459,32 @@ if (viewButtons.length) {
   });
 }
 
-  if (createButton) {
-    createButton.addEventListener("click", async () => {
-      const prompt = chainPrompt ? chainPrompt.value.trim() : "";
-      if (!prompt) return;
-      try {
-        await postJson("/api/chains", { mode: currentMode, prompt });
-        if (chainPrompt) chainPrompt.value = "";
-      } catch (err) {
-        console.error(err);
-      }
-    });
-  }
+if (createButton) {
+  createButton.addEventListener("click", async () => {
+    const prompt = chainPrompt ? chainPrompt.value.trim() : "";
+    if (!prompt) return;
+    try {
+      await postJson("/api/chains", { mode: currentMode, prompt });
+      if (chainPrompt) chainPrompt.value = "";
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
 
 if (replSend) {
   replSend.addEventListener("click", async () => {
     const input = replInput ? replInput.value.trim() : "";
     if (!input) return;
     try {
-      await sendReplInput(input);
+      const tab = getActiveReplTab();
+      if (tab && tab.type !== "main") {
+        await sendChainReplInput(tab, input);
+        await refreshChainRepl(tab, true);
+      } else {
+        await sendMainReplInput(input);
+      }
+      await refreshState();
       if (replInput) replInput.value = "";
     } catch (err) {
       console.error(err);
@@ -1262,9 +1574,121 @@ if (noteInput) {
   });
 }
 
+if (replNewManual) {
+  replNewManual.addEventListener("click", () => {
+    openChainModal("manual");
+  });
+}
+
+if (replNewAuto) {
+  replNewAuto.addEventListener("click", () => {
+    openChainModal("auto");
+  });
+}
+
+if (chainCancel) {
+  chainCancel.addEventListener("click", () => {
+    closeChainModal();
+  });
+}
+
+if (chainModal) {
+  chainModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.action === "close-chain") {
+      closeChainModal();
+    }
+  });
+}
+
+if (chainSubmit) {
+  chainSubmit.addEventListener("click", async () => {
+    if (!chainInput) return;
+    const prompt = chainInput.value.trim();
+    if (!prompt) return;
+    try {
+      const response = await postJson("/api/chains", { mode: pendingChainMode, prompt });
+      const tab = ensureChainTab(response.id, pendingChainMode);
+      if (tab) {
+        activeReplTabId = tab.id;
+      }
+      closeChainModal();
+      renderReplTabs();
+      await refreshState();
+      if (tab) {
+        await refreshChainRepl(tab, true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+if (chainInput) {
+  chainInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeChainModal();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      chainSubmit?.click();
+    }
+  });
+}
+
+if (renameTabCancel) {
+  renameTabCancel.addEventListener("click", () => {
+    closeRenameTabModal();
+  });
+}
+
+if (renameTabModal) {
+  renameTabModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.action === "close-rename") {
+      closeRenameTabModal();
+    }
+  });
+}
+
+if (renameTabSubmit) {
+  renameTabSubmit.addEventListener("click", () => {
+    if (!renameTargetTab || !renameTabInput) return;
+    const nextLabel = renameTabInput.value.trim();
+    if (nextLabel) {
+      renameTargetTab.customLabel = nextLabel;
+      replTabLabels.set(renameTargetTab.chainToken, nextLabel);
+    } else {
+      renameTargetTab.customLabel = "";
+      replTabLabels.delete(renameTargetTab.chainToken);
+    }
+    persistReplTabLabels();
+    closeRenameTabModal();
+    renderReplTabs();
+  });
+}
+
+if (renameTabInput) {
+  renameTabInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeRenameTabModal();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      renameTabSubmit?.click();
+    }
+  });
+}
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && noteModal && !noteModal.classList.contains("hidden")) {
     closeNoteModal();
+  }
+  if (event.key === "Escape" && chainModal && !chainModal.classList.contains("hidden")) {
+    closeChainModal();
+  }
+  if (event.key === "Escape" && renameTabModal && !renameTabModal.classList.contains("hidden")) {
+    closeRenameTabModal();
   }
 });
 
@@ -1433,8 +1857,35 @@ if (followAll) {
   });
 }
 
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const next = document.body?.dataset.theme === "dark" ? "light" : "dark";
+    if (window.localStorage) {
+      localStorage.setItem(THEME_KEY, next);
+    }
+    applyTheme(next);
+  });
+}
+
+const themeMedia =
+  window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+if (themeMedia) {
+  const handler = () => {
+    if (window.localStorage && localStorage.getItem(THEME_KEY)) return;
+    applyTheme(themeMedia.matches ? "dark" : "light");
+  };
+  if (themeMedia.addEventListener) {
+    themeMedia.addEventListener("change", handler);
+  } else if (themeMedia.addListener) {
+    themeMedia.addListener(handler);
+  }
+}
+
+initTheme();
+loadReplTabLabels();
 setMode(currentMode);
 setEditorView(editorView);
+renderReplTabs();
 loadTreeRoot();
 refreshState();
 startStream();
