@@ -46,6 +46,7 @@ TARGET_MOUNT="/workspace/container"
 TARGET_OVERRIDE_FILE="${SESSION_DIR}/compose.override.yml"
 TARGET_STATE_FILE="${SESSION_DIR}/target"
 TARGET_CHANGED=0
+TARGET_FORCE_RECREATE=0
 COMPOSE_ARGS=()
 HOSTD_PORT="${AUTOAGENTS_HOST_PORT:-5178}"
 HOSTD_PID_FILE="${SESSION_DIR}/hostd.pid"
@@ -261,7 +262,7 @@ ensure_running() {
         compose_legacy_build up -d --build
       fi
     fi
-  elif [ "$TARGET_CHANGED" -eq 1 ]; then
+  elif [ "$TARGET_CHANGED" -eq 1 ] || [ "$TARGET_FORCE_RECREATE" -eq 1 ]; then
     compose up -d --build --force-recreate
   fi
 
@@ -463,10 +464,12 @@ ui_cmd() {
       exit 1
     fi
     TARGET_DIR="$(cd "$target" && pwd -P)/container"
+    TARGET_FORCE_RECREATE=1
   elif [ "$pick" -eq 1 ]; then
     local picked
     picked="$(pick_folder)"
     TARGET_DIR="$picked/container"
+    TARGET_FORCE_RECREATE=1
   fi
 
   if [ "$start_host" -eq 1 ] && [ "${AUTOAGENTS_HOSTD_CALL:-0}" != "1" ]; then
