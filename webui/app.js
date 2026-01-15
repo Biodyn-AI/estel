@@ -126,6 +126,15 @@ const getPreferredChainId = () =>
 const getChainSummary = (chainId) =>
   latestChains.find((chain) => chain.id === chainId) || null;
 
+const selectChainForDetails = (chainId) => {
+  if (!chainId) return;
+  selectedChainId = chainId;
+  chainDetails = null;
+  renderChains(latestChains, latestActiveChain);
+  renderCode();
+  refreshChainDetails();
+};
+
 const setEditorView = (view) => {
   editorView = view;
   if (viewToggle) {
@@ -170,35 +179,31 @@ const refreshChainDetails = async () => {
   }
 };
 
-const renderChainDetails = () => {
-  if (!codePane || !codePath) return;
-  const chainId = getPreferredChainId();
+const buildChainDetailContent = (chainId) => {
+  const container = document.createElement("div");
+  container.className = "chain-detail";
   if (!chainId) {
-    codePath.textContent = "Chain details";
     const empty = document.createElement("div");
-    empty.className = "code-empty";
-    empty.textContent = "No chains available yet.";
-    codePane.appendChild(empty);
-    return;
+    empty.className = "chain-empty";
+    empty.textContent = "No chain selected.";
+    container.appendChild(empty);
+    return { heading: "Chains", element: container };
   }
 
   const summary = getChainSummary(chainId);
   const title = summary?.title || chainDetails?.chain?.title || "Chain details";
   const displayId = summary?.displayId || chainDetails?.chain?.displayId || chainId;
-  codePath.textContent = `${displayId} · ${title}`;
+  const heading = `${displayId} · ${title}`;
 
   if (!chainDetails || chainDetails.id !== chainId) {
     const loading = document.createElement("div");
-    loading.className = "code-empty";
+    loading.className = "chain-empty";
     loading.textContent = "Loading chain details...";
-    codePane.appendChild(loading);
-    return;
+    container.appendChild(loading);
+    return { heading, element: container };
   }
 
   const detail = chainDetails;
-  const wrapper = document.createElement("div");
-  wrapper.className = "chain-detail";
-
   const summaryCard = document.createElement("div");
   summaryCard.className = "chain-summary";
   const summaryTitle = document.createElement("h3");
@@ -226,7 +231,7 @@ const renderChainDetails = () => {
     summaryCard.appendChild(statusEl);
   }
 
-  wrapper.appendChild(summaryCard);
+  container.appendChild(summaryCard);
 
   const runs = detail.runs || [];
   const runsWrap = document.createElement("div");
@@ -300,8 +305,66 @@ const renderChainDetails = () => {
     });
   }
 
-  wrapper.appendChild(runsWrap);
-  codePane.appendChild(wrapper);
+  container.appendChild(runsWrap);
+  return { heading, element: container };
+};
+
+const renderChainDetails = () => {
+  if (!codePane || !codePath) return;
+  const chains = latestChains || [];
+  const selectedId = chains.length ? getPreferredChainId() : null;
+
+  const browser = document.createElement("div");
+  browser.className = "chain-browser";
+
+  const list = document.createElement("div");
+  list.className = "chain-browser-list";
+
+  if (!chains.length) {
+    const empty = document.createElement("div");
+    empty.className = "chain-empty";
+    empty.textContent = "No chains yet. Create one to get started.";
+    list.appendChild(empty);
+  } else {
+    chains.forEach((chain) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "chain-item";
+      if (chain.id === selectedId) {
+        item.classList.add("active");
+      }
+      const statusClass = statusClassFor(chain.status);
+      item.innerHTML = `
+        <div class="chain-top">
+          <span class="chain-id">${chain.displayId || "--"}</span>
+          <span class="status ${statusClass}">${chain.status}</span>
+        </div>
+        <div class="chain-title">${chain.title || "untitled chain"}</div>
+      `;
+      item.addEventListener("click", () => {
+        selectChainForDetails(chain.id);
+      });
+      list.appendChild(item);
+    });
+  }
+
+  const detail = document.createElement("div");
+  detail.className = "chain-browser-detail";
+  if (!chains.length) {
+    codePath.textContent = "Chains";
+    const emptyDetail = document.createElement("div");
+    emptyDetail.className = "chain-empty";
+    emptyDetail.textContent = "No chain details to show yet.";
+    detail.appendChild(emptyDetail);
+  } else {
+    const detailContent = buildChainDetailContent(selectedId);
+    codePath.textContent = detailContent.heading;
+    detail.appendChild(detailContent.element);
+  }
+
+  browser.appendChild(list);
+  browser.appendChild(detail);
+  codePane.appendChild(browser);
 };
 
 const renderChains = (chains, activeId) => {

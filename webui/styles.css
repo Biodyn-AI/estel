@@ -367,6 +367,9 @@ body.resizing-horizontal {
   color: var(--ink);
   font-family: var(--sans);
   font-size: 0.67rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .code textarea,
@@ -415,6 +418,33 @@ body.resizing-horizontal {
 
 .code-text {
   white-space: pre;
+}
+
+.chain-browser {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.chain-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  min-height: 0;
+  padding-right: 6px;
+}
+
+.chain-browser-detail {
+  overflow: auto;
+  min-height: 0;
+  padding-right: 6px;
+}
+
+.chain-browser .chain-item {
+  padding: 10px;
 }
 
 .chain-detail {
