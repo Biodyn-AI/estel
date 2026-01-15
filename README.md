@@ -186,11 +186,12 @@ A lightweight IDE-style dashboard lives in `webui/` and can be served from the c
 Start it:
 
 ```
-./agent start
-docker compose up -d ui
+./agent ui
 ```
 
 Then open `http://localhost:5177`.
+
+Tip: to pick a workspace folder via Finder, run `./agent ui --finder`.
 
 The UI uses the `UI_SESSION` (default `webui`) to keep manual REPL history and uses the
 shared queue to create and observe chains.

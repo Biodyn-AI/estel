@@ -75,6 +75,25 @@ has_appledouble() {
   find "$ROOT" -name '._*' -type f -print -quit | grep -q .
 }
 
+pick_folder() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    echo "folder picker is only supported on macOS" >&2
+    exit 1
+  fi
+  if ! command -v osascript >/dev/null 2>&1; then
+    echo "osascript is required for Finder selection" >&2
+    exit 1
+  fi
+  local picked
+  picked="$(osascript -e 'POSIX path of (choose folder with prompt "Select AutoAgents workspace")' 2>/dev/null || true)"
+  picked="${picked%/}"
+  if [ -z "$picked" ]; then
+    echo "no folder selected" >&2
+    exit 1
+  fi
+  echo "$picked"
+}
+
 yaml_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
 }
@@ -105,12 +124,13 @@ EOF
 }
 
 setup_target() {
-  if [ -n "$TARGET_DIR" ]; then
-    return 0
-  fi
   local base_dir
-  base_dir="${AUTOAGENTS_CONTAINER_ROOT:-$(pwd -P)}"
-  TARGET_DIR="${base_dir}/container"
+  if [ -n "$TARGET_DIR" ]; then
+    base_dir="$TARGET_DIR"
+  else
+    base_dir="${AUTOAGENTS_CONTAINER_ROOT:-$(pwd -P)}/container"
+    TARGET_DIR="$base_dir"
+  fi
   if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
     echo "container path exists and is not a directory: $TARGET_DIR" >&2
     exit 1
@@ -180,6 +200,7 @@ Usage:
   agent chain-resume <chain-id>
   agent install [--name <cmd>] [--bin-dir <path>] [--add-path]
   agent uninstall [--name <cmd>] [--bin-dir <path>]
+  agent ui [--path <dir>] [--finder] [--no-open] [--port <num>]
   agent start
   agent stop
   agent logs
@@ -305,6 +326,55 @@ start_autonomous_task() {
     args=(--session "$session" "${args[@]}")
   fi
   agentctl_exec start-autonomous "${args[@]}"
+}
+
+ui_cmd() {
+  local target=""
+  local pick=0
+  local open_browser=1
+  local port="${UI_PORT:-5177}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path)
+        target="${2:-}"
+        shift 2
+        ;;
+      --finder|--pick)
+        pick=1
+        shift
+        ;;
+      --no-open)
+        open_browser=0
+        shift
+        ;;
+      --port)
+        port="${2:-$port}"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [ -n "$target" ]; then
+    if [ ! -d "$target" ]; then
+      echo "target folder not found: $target" >&2
+      exit 1
+    fi
+    TARGET_DIR="$(cd "$target" && pwd -P)/container"
+  elif [ "$pick" -eq 1 ]; then
+    local picked
+    picked="$(pick_folder)"
+    TARGET_DIR="$picked/container"
+  fi
+
+  ensure_running
+  compose up -d ui
+  echo "Web UI running on http://localhost:${port}"
+  if [ "$open_browser" -eq 1 ] && command -v open >/dev/null 2>&1; then
+    open "http://localhost:${port}" >/dev/null 2>&1 || true
+  fi
 }
 
 install_cmd() {
@@ -567,6 +637,10 @@ case "${1:-}" in
   chain-note|chain-append|chain-clear|chain-stop|chain-resume)
     ensure_running
     agentctl_exec "$@"
+    ;;
+  ui)
+    shift
+    ui_cmd "$@"
     ;;
   install)
     install_cmd "${@:2}"
