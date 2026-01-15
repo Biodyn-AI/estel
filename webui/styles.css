@@ -571,7 +571,6 @@ body.resizing-horizontal {
 
 .repl {
   min-height: 220px;
-  max-height: 280px;
 }
 
 .repl-status {
