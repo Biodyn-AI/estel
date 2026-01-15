@@ -80,13 +80,20 @@ const readTree = (dirPath, depth) => {
   if (depth < 0) return [];
   const entries = safeReadDir(dirPath)
     .filter((name) => !TREE_SKIP.has(name))
+    .filter((name) => !name.startsWith("._"))
     .map((name) => {
       const fullPath = path.join(dirPath, name);
-      const stat = fs.statSync(fullPath);
+      let stat;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        return null;
+      }
       const type = stat.isDirectory() ? "folder" : "file";
       const relative = path.relative(WORKSPACE, fullPath);
       return { name, type, path: relative, fullPath };
     })
+    .filter(Boolean)
     .sort((a, b) => {
       if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
       return a.name.localeCompare(b.name);
