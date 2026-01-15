@@ -1,7 +1,7 @@
 # AutoAgents (Dockerized)
 
 Run Codex CLI agents inside a Docker container with a durable queue, REPL, and autonomous chains.
-This project is desiOegned to use a Codex subscription via the CLI (no API tokens) while keeping
+This project is desiegned to use a Codex subscription via the CLI (no API tokens) while keeping
 the host system isolated.
 
 ## What this gives you
