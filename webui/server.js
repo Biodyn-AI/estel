@@ -399,7 +399,13 @@ const tailLines = (filePath, maxLines = 120) => {
 };
 
 const loadReplLines = () => {
+  const replFile = path.join(QUEUE_DIR, "sessions", `${UI_SESSION}.repl.md`);
   const sessionFile = path.join(QUEUE_DIR, "sessions", `${UI_SESSION}.md`);
+  if (fs.existsSync(replFile)) {
+    const content = fs.readFileSync(replFile, "utf8");
+    const entries = parseSessionHistory(content);
+    return entries.slice(-80);
+  }
   if (fs.existsSync(sessionFile)) {
     const content = fs.readFileSync(sessionFile, "utf8");
     const entries = parseSessionHistory(content);

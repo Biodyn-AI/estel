@@ -126,6 +126,11 @@ session_file() {
   echo "${SESSIONS_DIR}/${session_id}.md"
 }
 
+repl_session_file() {
+  local session_id="$1"
+  echo "${SESSIONS_DIR}/${session_id}.repl.md"
+}
+
 chain_note_file() {
   local chain_id="$1"
   echo "${CHAINS_DIR}/${chain_id}.note"
@@ -193,6 +198,20 @@ append_session_history() {
   local assistant_output="$3"
   local file
   file="$(session_file "$session_id")"
+  {
+    printf 'User:\n%s\n\nAssistant:\n%s\n\n' "$user_prompt" "$assistant_output"
+  } >> "$file"
+}
+
+append_repl_history() {
+  local session_id="$1"
+  local user_prompt="$2"
+  local assistant_output="$3"
+  if [ -z "$session_id" ]; then
+    return 0
+  fi
+  local file
+  file="$(repl_session_file "$session_id")"
   {
     printf 'User:\n%s\n\nAssistant:\n%s\n\n' "$user_prompt" "$assistant_output"
   } >> "$file"
@@ -565,6 +584,7 @@ process_task() {
     log "chain $chain stop requested; skipping task $id"
     printf 'DONE\nChain stopped by user.\n' > "$output_file"
     append_chain_summary "$chain" "$output_file" "Chain stopped by user." 1 "$id"
+    append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
     record_last_output_chain "${chain:-$id}"
     cp "$output_file" "$OUTBOX_DIR/$id.md"
     rm -f "$task_file"
@@ -577,10 +597,12 @@ process_task() {
 
     if [ "$mode" = "manual" ] && [ -n "$session" ]; then
       append_session_history "$session" "$raw_prompt" "$(cat "$output_file")"
+      append_repl_history "$session" "$raw_prompt" "$(cat "$output_file")"
     fi
 
     if [ "$mode" = "autonomous" ]; then
       record_last_output_chain "${chain:-$id}"
+      append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
       local next_task result next_id
       local chain_done=0
       local chain_reason=""
@@ -637,6 +659,7 @@ process_task() {
     log "task $id failed"
     if [ "$mode" = "autonomous" ]; then
       record_last_output_chain "${chain:-$id}"
+      append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
     fi
   fi
 
