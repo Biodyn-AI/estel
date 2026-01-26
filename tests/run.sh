@@ -166,4 +166,14 @@ wait_for_grep "FALLBACK_TASK" "$WORKSPACE/queue/runs"
 
 echo "ok: fallback next-task generation"
 
+# Test 6: extension diagnostics output
+EXTENSION_ROOT="$ROOT/../estel-vscode"
+if [ ! -d "$EXTENSION_ROOT" ]; then
+  fail "missing estel-vscode checkout at $EXTENSION_ROOT"
+fi
+npm --prefix "$EXTENSION_ROOT" run compile >/dev/null
+NODE_PATH="$EXTENSION_ROOT/tests/stubs" node "$EXTENSION_ROOT/tests/diagnostics-smoke.js"
+
+echo "ok: diagnostics command output"
+
 echo "All tests passed."

@@ -5,5 +5,10 @@ tasks/
 
 # Editor/system
 .idea/
+.vscode/
 .DS_Store
 ._*
+
+# Local working dirs
+container/
+test/

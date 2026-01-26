@@ -194,6 +194,33 @@ yaml_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
 }
 
+flags_has_cd() {
+  local flags="$1"
+  printf '%s' "$flags" | grep -Eq '(^|[[:space:]])(--cd|-C)([[:space:]]|=)'
+}
+
+flags_extract_cd() {
+  local flags="$1"
+  local -a parts=()
+  read -r -a parts <<< "$flags"
+  local i
+  for ((i = 0; i < ${#parts[@]}; i++)); do
+    case "${parts[$i]}" in
+      -C|--cd)
+        if [ $((i + 1)) -lt ${#parts[@]} ]; then
+          printf '%s' "${parts[$((i + 1))]}"
+          return 0
+        fi
+        ;;
+      --cd=*)
+        printf '%s' "${parts[$i]#--cd=}"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 write_override_file() {
   local host_path="$1"
   local volume_spec
@@ -201,8 +228,19 @@ write_override_file() {
   local quoted_volume
   quoted_volume="$(yaml_quote "$volume_spec")"
   local code_flags="${AUTOAGENTS_CODEX_FLAGS:-${CODEX_FLAGS:---dangerously-bypass-approvals-and-sandbox -C ${TARGET_MOUNT}}}"
+  local exec_flags="${AUTOAGENTS_CODEX_EXEC_FLAGS:-${CODEX_EXEC_FLAGS:---skip-git-repo-check}}"
+  if ! flags_has_cd "$exec_flags"; then
+    local cd_path=""
+    cd_path="$(flags_extract_cd "$code_flags" || true)"
+    if [ -z "$cd_path" ]; then
+      cd_path="$TARGET_MOUNT"
+    fi
+    exec_flags="${exec_flags} -C ${cd_path}"
+  fi
   local quoted_flags
   quoted_flags="$(yaml_quote "$code_flags")"
+  local quoted_exec_flags
+  quoted_exec_flags="$(yaml_quote "$exec_flags")"
   local quoted_mount
   quoted_mount="$(yaml_quote "$TARGET_MOUNT")"
   local quoted_host_path
@@ -215,6 +253,7 @@ services:
       - ${quoted_volume}
     environment:
       CODEX_FLAGS: ${quoted_flags}
+      CODEX_EXEC_FLAGS: ${quoted_exec_flags}
       AGENT_WORKDIR: ${quoted_mount}
   ui:
     volumes:
@@ -226,12 +265,16 @@ EOF
 }
 
 setup_target() {
-  local base_dir
-  if [ -n "$TARGET_DIR" ]; then
-    base_dir="$TARGET_DIR"
+  if [ -n "${AUTOAGENTS_TARGET_PATH:-}" ]; then
+    if [ ! -d "$AUTOAGENTS_TARGET_PATH" ]; then
+      echo "target folder not found: $AUTOAGENTS_TARGET_PATH" >&2
+      exit 1
+    fi
+    TARGET_DIR="$(cd "$AUTOAGENTS_TARGET_PATH" && pwd -P)"
+  elif [ -n "$TARGET_DIR" ]; then
+    :
   else
-    base_dir="${AUTOAGENTS_CONTAINER_ROOT:-$(pwd -P)}/container"
-    TARGET_DIR="$base_dir"
+    TARGET_DIR="${AUTOAGENTS_CONTAINER_ROOT:-$(pwd -P)}/container"
   fi
   if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
     echo "container path exists and is not a directory: $TARGET_DIR" >&2
@@ -259,13 +302,17 @@ is_running() {
 
 ensure_running() {
   setup_target
+  local -a up_args=(-d --build)
+  if [ "$TARGET_CHANGED" -eq 1 ] || [ "$TARGET_FORCE_RECREATE" -eq 1 ]; then
+    up_args+=(--force-recreate)
+  fi
   if ! is_running; then
     cleanup_appledouble
     if has_appledouble; then
-      compose_legacy_build up -d --build
+      compose_legacy_build up "${up_args[@]}"
     else
-      if ! compose up -d --build; then
-        compose_legacy_build up -d --build
+      if ! compose up "${up_args[@]}"; then
+        compose_legacy_build up "${up_args[@]}"
       fi
     fi
   elif [ "$TARGET_CHANGED" -eq 1 ] || [ "$TARGET_FORCE_RECREATE" -eq 1 ]; then

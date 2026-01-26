@@ -12,7 +12,8 @@ services:
     volumes:
       - /path/to/target-repo:/workspace/target
     environment:
-      CODEX_FLAGS: "--dangerously-bypass-approvals-and-sandbox -C /workspace/target"
+      CODEX_FLAGS: "--dangerously-bypass-approvals-and-sandbox"
+      CODEX_EXEC_FLAGS: "--skip-git-repo-check -C /workspace/target"
       # Optional: drop skip-git-repo-check for repo awareness
       # CODEX_EXEC_FLAGS: ""
 ```
@@ -28,11 +29,22 @@ All work happens inside `/workspace/target`.
 
 ## One-off (no file changes)
 
-You can override `CODEX_FLAGS` for a single run, but the repo still must be mounted:
+You can override `CODEX_EXEC_FLAGS` for a single run, but the repo still must be mounted:
 
 ```bash
-CODEX_FLAGS="--dangerously-bypass-approvals-and-sandbox -C /workspace/target" ./agent
+CODEX_EXEC_FLAGS="--skip-git-repo-check -C /workspace/target" ./agent
 ```
+
+## Environment override (mount external target)
+
+Set a host path to mount at `/workspace/container` without editing compose files:
+
+```bash
+AUTOAGENTS_TARGET_PATH="/path/to/target-repo" ./agent start
+./agent
+```
+
+Use `AUTOAGENTS_CODEX_EXEC_FLAGS` or `CODEX_EXEC_FLAGS` if you want a subdirectory under `/workspace/container`.
 
 ## Multiple target repos
 
