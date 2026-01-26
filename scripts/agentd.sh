@@ -25,6 +25,7 @@ CODEX_EXEC_MODE="${CODEX_EXEC_MODE:-stdin}"
 AGENT_WORKDIR="${AGENT_WORKDIR:-}"
 AUTONOMOUS_CONTEXT_LIMIT="${AUTONOMOUS_CONTEXT_LIMIT:-4000}"
 CHAIN_SUMMARY_LIMIT="${CHAIN_SUMMARY_LIMIT:-1200}"
+CHAIN_REPL_SUMMARY_LIMIT="${CHAIN_REPL_SUMMARY_LIMIT:-600}"
 SESSION_CONTEXT_LIMIT="${SESSION_CONTEXT_LIMIT:-8000}"
 SHUTDOWN=0
 
@@ -354,6 +355,12 @@ ${repl_history:-<none>}
 CHAIN_NOTES:
 ${note:-<none>}
 
+AUTONOMOUS_TASKING_GUIDE:
+- Use the full power of a single run: prefer large, end-to-end tasks that deliver meaningful progress.
+- Avoid micro-steps (e.g. "open file", "scan folder", "make a list"). Do those inside the run.
+- A good task combines related steps and produces a concrete deliverable or decision.
+- Only split into smaller tasks if you are genuinely blocked or the task would exceed a single run.
+
 If possible, include a next task. If no reasonable follow-up exists, output DONE.
 
 Return output in this exact format (tokens must be on their own lines):
@@ -401,6 +408,11 @@ ${repl_history:-<none>}
 
 CHAIN_NOTES:
 ${note:-<none>}
+
+AUTONOMOUS_TASKING_GUIDE:
+- Propose a substantial next task that moves the goal forward in a meaningful way.
+- Avoid tiny, single-action tasks; bundle related steps into one larger unit of work.
+- Only split if blocked or the work cannot reasonably fit in one run.
 
 Return output in this exact format (tokens must be on their own lines):
 
@@ -498,16 +510,13 @@ summary_from_chain() {
   summary_from_output "$output_file"
 }
 
-append_chain_summary() {
+build_chain_summary() {
   local chain_id="$1"
   local output_file="$2"
   local reason="${3:-}"
   local prefer_chain="${4:-0}"
   local skip_id="${5:-}"
   if [ -z "$output_file" ] || [ ! -f "$output_file" ]; then
-    return 0
-  fi
-  if grep -q '^[[:space:]]*SUMMARY:' "$output_file"; then
     return 0
   fi
   local summary=""
@@ -521,8 +530,62 @@ append_chain_summary() {
     summary="$reason"
   fi
   if [ -n "$summary" ]; then
+    printf '%s' "$summary"
+  fi
+}
+
+append_chain_summary() {
+  local chain_id="$1"
+  local output_file="$2"
+  local reason="${3:-}"
+  local prefer_chain="${4:-0}"
+  local skip_id="${5:-}"
+  if [ -z "$output_file" ] || [ ! -f "$output_file" ]; then
+    return 0
+  fi
+  if grep -q '^[[:space:]]*SUMMARY:' "$output_file"; then
+    return 0
+  fi
+  local summary
+  summary="$(build_chain_summary "$chain_id" "$output_file" "$reason" "$prefer_chain" "$skip_id")"
+  if [ -n "$summary" ]; then
     printf '\nSUMMARY:\n%s\n' "$summary" >> "$output_file"
   fi
+}
+
+append_chain_repl_summary() {
+  local chain_id="$1"
+  local session="$2"
+  local output_file="$3"
+  local reason="${4:-}"
+  local prefer_chain="${5:-0}"
+  local skip_id="${6:-}"
+  local run_id="${7:-}"
+  if [ -z "$session" ]; then
+    return 0
+  fi
+  if [ -z "$run_id" ]; then
+    run_id="$chain_id"
+  fi
+  local summary=""
+  summary="$(build_chain_summary "$chain_id" "$output_file" "$reason" "$prefer_chain" "$skip_id")"
+  if [ -n "$summary" ]; then
+    summary="$(trim_summary "$summary" "$CHAIN_REPL_SUMMARY_LIMIT")"
+  fi
+  local storage="Results/Reports (relative to WORKSPACE_ROOT):"$'\n'"- queue/outbox/${run_id}.md"$'\n'"- queue/runs/${run_id}/"
+  if [ -n "$chain_id" ]; then
+    local safe_chain
+    safe_chain="$(sanitize_chain_id "$chain_id")"
+    storage="${storage}"$'\n'"- queue/sessions/${session}.chain.${safe_chain}.repl.md"
+  fi
+  local body=""
+  if [ -n "$summary" ]; then
+    body="Summary:"$'\n'"${summary}"$'\n\n'"${storage}"
+  else
+    body="${storage}"
+  fi
+  append_repl_history "$session" "AUTO CHAIN SUMMARY (chain ${chain_id:-$run_id})" "$body"
+  append_chain_repl_history "$session" "$chain_id" "AUTO CHAIN SUMMARY (chain ${chain_id:-$run_id})" "$body"
 }
 
 run_codex() {
@@ -710,6 +773,7 @@ process_task() {
     append_chain_summary "$chain" "$output_file" "Chain stopped by user." 1 "$id"
     append_repl_history "$session" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
     append_chain_repl_history "$session" "$chain_log_id" "AUTO TASK (chain ${chain:-$id}): $task" "$(cat "$output_file")"
+    append_chain_repl_summary "$chain_log_id" "$session" "$output_file" "Chain stopped by user." 1 "$id" "$id"
     record_last_output_chain "${chain:-$id}"
     cp "$output_file" "$OUTBOX_DIR/$id.md"
     rm -f "$task_file"
@@ -777,6 +841,7 @@ process_task() {
       fi
       if [ "$chain_done" -eq 1 ]; then
         append_chain_summary "$chain" "$output_file" "$chain_reason" 0 "$id"
+        append_chain_repl_summary "$chain_log_id" "$session" "$output_file" "$chain_reason" 0 "$id" "$id"
       fi
     fi
 
