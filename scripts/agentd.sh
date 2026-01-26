@@ -263,6 +263,23 @@ load_session_history() {
   fi
 }
 
+load_chain_repl_history() {
+  local session_id="$1"
+  local chain_id="$2"
+  if [ -z "$session_id" ]; then
+    return 0
+  fi
+  if [ -n "$chain_id" ]; then
+    local chain_file
+    chain_file="$(chain_repl_file "$session_id" "$chain_id")"
+    if [ -f "$chain_file" ]; then
+      trim_context "$(cat "$chain_file")" "$SESSION_CONTEXT_LIMIT"
+      return 0
+    fi
+  fi
+  load_session_history "$session_id"
+}
+
 build_session_prompt() {
   local history="$1"
   local user_prompt="$2"
@@ -735,7 +752,7 @@ process_task() {
     fi
     note="$(load_chain_note "$chain")"
     local repl_history
-    repl_history="$(load_session_history "$session")"
+    repl_history="$(load_chain_repl_history "$session" "${chain:-$id}")"
     prompt="$(build_autonomous_prompt "$goal" "$task" "$context" "$note" "$repl_history")"
   elif [ "$mode" = "manual" ]; then
     raw_prompt="$(jq -r '.prompt // empty' "$task_file")"
